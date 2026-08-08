@@ -1,0 +1,418 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: companion
+    description: Companion orchestration
+  - name: conversations
+    description: Conversation history
+  - name: memory
+    description: Persistent memory
+  - name: agents
+    description: Specialized agent registry
+  - name: tasks
+    description: Delegated tasks
+  - name: activity
+    description: Execution activity
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /companion/respond:
+    post:
+      operationId: respondWithCompanion
+      tags: [companion]
+      summary: Send a request to the Companion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanionRequest"
+      responses:
+        "200":
+          description: Companion response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionResponse"
+        "400":
+          description: Invalid request
+        "500":
+          description: Companion unavailable
+  /conversations:
+    get:
+      operationId: listConversations
+      tags: [conversations]
+      summary: List conversations
+      responses:
+        "200":
+          description: Conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+    post:
+      operationId: createConversation
+      tags: [conversations]
+      summary: Create a conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationInput"
+      responses:
+        "201":
+          description: Created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+  /conversations/{id}:
+    get:
+      operationId: getConversation
+      tags: [conversations]
+      summary: Get a conversation
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+        "404":
+          description: Conversation not found
+  /conversations/{id}/messages:
+    get:
+      operationId: listMessages
+      tags: [conversations]
+      summary: List messages in a conversation
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+  /memory:
+    get:
+      operationId: listMemories
+      tags: [memory]
+      summary: List persistent memories
+      responses:
+        "200":
+          description: Memories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Memory"
+    post:
+      operationId: createMemory
+      tags: [memory]
+      summary: Store a memory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryInput"
+      responses:
+        "201":
+          description: Created memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Memory"
+  /memory/{id}:
+    patch:
+      operationId: updateMemory
+      tags: [memory]
+      summary: Update a memory
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemoryUpdate"
+      responses:
+        "200":
+          description: Updated memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Memory"
+    delete:
+      operationId: deleteMemory
+      tags: [memory]
+      summary: Delete a memory
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        "204":
+          description: Deleted memory
+  /agents:
+    get:
+      operationId: listAgents
+      tags: [agents]
+      summary: List registered agents
+      responses:
+        "200":
+          description: Agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Agent"
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      summary: List delegated tasks
+      responses:
+        "200":
+          description: Tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Task"
+    post:
+      operationId: createTask
+      tags: [tasks]
+      summary: Create a delegated task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskInput"
+      responses:
+        "201":
+          description: Created task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+  /tasks/{id}:
+    patch:
+      operationId: updateTask
+      tags: [tasks]
+      summary: Update a task
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskUpdate"
+      responses:
+        "200":
+          description: Updated task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+  /activity:
+    get:
+      operationId: listActivity
+      tags: [activity]
+      summary: List recent execution activity
+      responses:
+        "200":
+          description: Recent activity
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Activity"
+  /summary:
+    get:
+      operationId: getWorkforceSummary
+      tags: [activity]
+      summary: Get a lightweight workforce summary
+      responses:
+        "200":
+          description: Workforce summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkforceSummary"
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: number
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    Conversation:
+      type: object
+      required: [id, title, createdAt, updatedAt]
+      properties:
+        id: { type: number }
+        title: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ConversationInput:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1 }
+    Message:
+      type: object
+      required: [id, conversationId, role, content, createdAt]
+      properties:
+        id: { type: number }
+        conversationId: { type: number }
+        role:
+          type: string
+          enum: [user, companion, agent, system]
+        content: { type: string }
+        agentId: { type: [number, "null"] }
+        createdAt: { type: string, format: date-time }
+    Memory:
+      type: object
+      required: [id, title, content, kind, importance, createdAt, updatedAt]
+      properties:
+        id: { type: number }
+        title: { type: string }
+        content: { type: string }
+        kind: { type: string }
+        importance: { type: number }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MemoryInput:
+      type: object
+      required: [title, content]
+      properties:
+        title: { type: string, minLength: 1 }
+        content: { type: string }
+        kind: { type: string }
+        importance: { type: number, minimum: 1, maximum: 5 }
+    MemoryUpdate:
+      type: object
+      properties:
+        title: { type: string, minLength: 1 }
+        content: { type: string }
+        kind: { type: string }
+        importance: { type: number, minimum: 1, maximum: 5 }
+    Agent:
+      type: object
+      required: [id, name, role, description, status]
+      properties:
+        id: { type: number }
+        name: { type: string }
+        role: { type: string }
+        description: { type: string }
+        status: { type: string, enum: [active, planned] }
+    Task:
+      type: object
+      required: [id, title, objective, status, createdAt, updatedAt]
+      properties:
+        id: { type: number }
+        title: { type: string }
+        objective: { type: string }
+        status: { type: string, enum: [queued, running, completed, needs_approval] }
+        agentId: { type: [number, "null"] }
+        conversationId: { type: [number, "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TaskInput:
+      type: object
+      required: [title, objective]
+      properties:
+        title: { type: string, minLength: 1 }
+        objective: { type: string, minLength: 1 }
+        agentId: { type: [number, "null"] }
+        conversationId: { type: [number, "null"] }
+        status: { type: string, enum: [queued, running, completed, needs_approval] }
+    TaskUpdate:
+      type: object
+      properties:
+        title: { type: string, minLength: 1 }
+        objective: { type: string, minLength: 1 }
+        status: { type: string, enum: [queued, running, completed, needs_approval] }
+        agentId: { type: [number, "null"] }
+    Activity:
+      type: object
+      required: [id, type, summary, createdAt]
+      properties:
+        id: { type: number }
+        type: { type: string }
+        summary: { type: string }
+        agentId: { type: [number, "null"] }
+        taskId: { type: [number, "null"] }
+        createdAt: { type: string, format: date-time }
+    CompanionRequest:
+      type: object
+      required: [conversationId, message]
+      properties:
+        conversationId: { type: number }
+        message: { type: string, minLength: 1 }
+    CompanionResponse:
+      type: object
+      required: [conversationId, userMessage, companionMessage, delegated, reviewed]
+      properties:
+        conversationId: { type: number }
+        userMessage:
+          $ref: "#/components/schemas/Message"
+        companionMessage:
+          $ref: "#/components/schemas/Message"
+        delegated: { type: boolean }
+        agent:
+          $ref: "#/components/schemas/Agent"
+        task:
+          $ref: "#/components/schemas/Task"
+        reviewed: { type: boolean }
+    WorkforceSummary:
+      type: object
+      required: [conversationCount, memoryCount, openTaskCount, activityCount]
+      properties:
+        conversationCount: { type: number }
+        memoryCount: { type: number }
+        openTaskCount: { type: number }
+        activityCount: { type: number }
+

@@ -1,0 +1,1 @@
+- [Explicit provider degradation](provider-degradation.md) — preserve Companion orchestration traces with a clearly labeled fallback when model billing is unavailable.

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Personal AI Workforce"
+description = "A mobile-first personal AI workspace where a Companion orchestrates specialized agents, maintains conversation history and memory, and records tasks and execution activity without taking risky external actions."
+version = "1.0.0"
+id = "artifacts/personal-ai-workforce"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22527
+
+[services.development]
+run = "pnpm --filter @workspace/personal-ai-workforce run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/personal-ai-workforce", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/personal-ai-workforce/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22527"
+BASE_PATH = "/"
