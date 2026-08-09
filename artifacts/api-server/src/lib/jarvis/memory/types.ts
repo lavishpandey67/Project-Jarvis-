@@ -145,6 +145,7 @@ export interface CognitiveReasoningArtifact {
  * Internal Tool Foundation Types
  */
 export type ToolPermissionClass = "READ" | "WRITE" | "EXECUTE" | "DESTRUCTIVE";
+export type ToolFailurePolicy = "STOP_ON_FAILURE" | "RETRY" | "CONTINUE_WITH_WARNING";
 
 export interface ToolDefinition {
   id: string;
@@ -157,6 +158,10 @@ export interface ToolDefinition {
   resourceCost: number; // 1 to 5
   inputSchema: Record<string, any>;
   outputSchema: Record<string, any>;
+  allowedAgentRoles?: string[];
+  externalImpact?: boolean;
+  executionTimeoutMs?: number;
+  failurePolicy?: ToolFailurePolicy;
   execute: (input: any, context?: any) => Promise<ToolExecutionResult>;
 }
 
@@ -166,6 +171,75 @@ export interface ToolExecutionResult {
   error?: string;
   logs?: string[];
   executionTimeMs: number;
+}
+
+export interface ToolExecutionTrace {
+  id: string;
+  toolId: string;
+  toolName: string;
+  agentRole?: string;
+  taskId?: string;
+  input: any;
+  output: any;
+  success: boolean;
+  error?: string;
+  executionTimeMs: number;
+  permissionClass: ToolPermissionClass;
+  riskLevel: string;
+  createdAt: string;
+}
+
+/**
+ * User Personal Cognitive Pattern Modeling Types
+ */
+export type CognitivePatternType =
+  | "RECURRING_GOAL"
+  | "DECISION_CRITERIA"
+  | "REASONING_APPROACH"
+  | "USER_CORRECTION"
+  | "STABLE_PREFERENCE"
+  | "PROJECT_RELATIONSHIP"
+  | "SUCCESSFUL_STRATEGY";
+
+export interface PatternEvidenceItem {
+  interactionId?: string;
+  timestamp: string;
+  observation: string;
+}
+
+export interface UserCognitivePattern {
+  id: string;
+  patternType: CognitivePatternType;
+  title: string;
+  description: string;
+  evidence: PatternEvidenceItem[];
+  confidence: number; // 0 to 100
+  occurrences: number;
+  source: string;
+  projectId?: string;
+  validationStatus: "CANDIDATE" | "VALIDATED" | "REJECTED";
+  createdAt: string;
+  updatedAt: string;
+  lastObservedAt: string;
+}
+
+/**
+ * Cognitive Challenge & Counterfactual Types
+ */
+export interface CognitiveChallengeReport {
+  triggered: boolean;
+  score: number; // 0 to 100
+  rationale: string;
+  assumptionsIdentified: string[];
+  unsupportedClaims: string[];
+  contradictionsDetected: string[];
+  alternativeHypotheses: string[];
+  alternativeStrategies: Array<{ strategy: string; tradeoffs: string; riskLevel: string }>;
+  secondOrderConsequences: string[];
+  counterfactualScenarios: Array<{ scenario: string; potentialOutcome: string }>;
+  reversibilityAssessment: "reversible" | "partially_reversible" | "irreversible";
+  confidenceScore: number; // 0.0 to 1.0
+  createdAt: string;
 }
 
 /**
@@ -193,12 +267,14 @@ export interface ScopedContextPackage {
   applicableDecisions: CognitiveMemoryRecord[];
   relevantLessons: CognitiveMemoryRecord[];
   episodicTraces: CognitiveMemoryRecord[];
+  userCognitivePatterns?: UserCognitivePattern[];
   activeTasks: Array<{ id: number; title: string; status: string }>;
   agentPermissions: ToolPermission[];
   currentTaskState?: { taskId: string; status: string; revisionCount: number };
   unresolvedConflicts: MemoryConflictRecord[];
   constraints: string[];
   cognitiveStateSnapshot?: CognitiveStateSnapshot;
+  cognitiveChallengeReport?: CognitiveChallengeReport;
   retrievalMetadata: ContextRetrievalMetadata;
 }
 

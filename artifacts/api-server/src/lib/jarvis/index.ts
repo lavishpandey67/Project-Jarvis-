@@ -5,6 +5,8 @@ import { executeTaskGraph } from "./dag/runner";
 import { DAGExecutionResult, TaskGraph } from "./dag/types";
 import { evaluateGraphObjective } from "./eval/evaluator";
 import { GraphEvaluationResult } from "./eval/types";
+import { CognitiveChallengeEngine } from "./eval/cognitiveChallenge";
+import { CognitiveChallengeReport } from "./memory/types";
 import { analyzeIntent, ModelCaller } from "./intentAnalyzer";
 import { createPlan } from "./planner";
 import { FIVE_AGENT_WORKFORCE, getAllAgentContracts, getAgentByName, getAgentByRole } from "./registry";
@@ -41,12 +43,16 @@ export * from "./memory/store";
 export * from "./memory/contextEngine";
 export * from "./memory/cognitiveState";
 
+export * from "./eval/cognitiveChallenge";
+export * from "./memory/patternTracker";
+
 export interface JarvisExecutionResult {
   intent: IntentAnalysis;
   plan: JarvisPlan;
   taskGraph?: TaskGraph;
   dagResult?: DAGExecutionResult;
   graphEvaluation?: GraphEvaluationResult;
+  cognitiveChallenge?: CognitiveChallengeReport;
   agentResponses: StructuredAgentResponse[];
   synthesis: JarvisSynthesis;
   context: ScopedContext;
@@ -57,6 +63,7 @@ export async function processWithJarvisBrain(
   userMessage: string,
   rawWorkspaceData: {
     conversationId: number;
+    projectId?: string;
     recentMessages: Array<{ role: string; content: string }>;
     memories: Array<{ title: string; content: string; importance: number }>;
     tasks: Array<{ id: number; title: string; status: string }>;
@@ -66,14 +73,23 @@ export async function processWithJarvisBrain(
   // Step 1: Scope Context
   const scopedContext = scopeContextForTask(rawWorkspaceData);
 
-  // Step 2: Intent Analysis
+  // Step 2: Intent Analysis & Complexity Classification
   const intent = await analyzeIntent(userMessage, scopedContext, callModelFn);
 
-  // Step 3: Create Plan & DAG Graph
+  // Step 3: Cognitive Challenge Engine Evaluation
+  const challengeEngine = new CognitiveChallengeEngine();
+  const cognitiveChallenge = challengeEngine.evaluateChallenge({
+    userMessage,
+    intentComplexity: intent.complexity,
+    intentDomain: intent.domain,
+    proposedPlanSummary: intent.objective,
+  });
+
+  // Step 4: Create Plan & DAG Graph
   const plan = createPlan(intent);
   const taskGraph = createDAGFromIntent(intent);
 
-  // Step 4: Execute DAG Graph via Task Engine
+  // Step 5: Execute DAG Graph via Task Engine
   let dagResult: DAGExecutionResult | undefined;
   let graphEvaluation: GraphEvaluationResult | undefined;
   const agentResponses: StructuredAgentResponse[] = [];
@@ -103,8 +119,13 @@ export async function processWithJarvisBrain(
     }
   }
 
-  // Step 5: Synthesize Results
+  // Step 6: Synthesize Results
   const synthesis = await synthesizeResults(intent, plan, agentResponses, callModelFn);
+
+  // If cognitive challenge was triggered, annotate synthesis constructively
+  if (cognitiveChallenge.triggered) {
+    synthesis.summary += ` [Cognitive Challenge Note: ${cognitiveChallenge.rationale}]`;
+  }
 
   // If graph evaluation indicated failure/escalation, annotate synthesis safely
   if (graphEvaluation && (graphEvaluation.overallVerdict === "FAIL" || graphEvaluation.overallVerdict === "ESCALATE")) {
@@ -117,6 +138,7 @@ export async function processWithJarvisBrain(
     taskGraph,
     dagResult,
     graphEvaluation,
+    cognitiveChallenge,
     agentResponses,
     synthesis,
     context: scopedContext,

@@ -1,4 +1,5 @@
 import { CognitiveComplexityLevel, ToolPermissionClass } from "./memory/types";
+export type { CognitiveComplexityLevel };
 import { IntentAnalysis } from "./types";
 
 export interface ComplexityConfiguration {

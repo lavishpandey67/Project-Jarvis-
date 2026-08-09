@@ -1,6 +1,7 @@
 import { ToolPermission } from "../types";
 import { RelevanceScorer, ScoringConfig } from "./scorer";
 import { CognitiveMemoryStore } from "./store";
+import { PythonIntelligenceClient } from "../pythonBridge/client";
 import {
   CognitiveMemoryRecord,
   ContextBudget,
@@ -14,6 +15,7 @@ import {
 export interface ContextEngineOptions {
   store: CognitiveMemoryStore;
   scorer?: RelevanceScorer;
+  pythonClient?: PythonIntelligenceClient;
   defaultBudget?: ContextBudget;
 }
 
@@ -33,11 +35,13 @@ export const DEFAULT_CONTEXT_BUDGET: ContextBudget = {
 export class ContextRetrievalEngine {
   private store: CognitiveMemoryStore;
   private scorer: RelevanceScorer;
+  private pythonClient: PythonIntelligenceClient;
   private defaultBudget: ContextBudget;
 
   constructor(options: ContextEngineOptions) {
     this.store = options.store;
     this.scorer = options.scorer || new RelevanceScorer();
+    this.pythonClient = options.pythonClient || new PythonIntelligenceClient();
     this.defaultBudget = options.defaultBudget || DEFAULT_CONTEXT_BUDGET;
   }
 
@@ -75,17 +79,56 @@ export class ContextRetrievalEngine {
 
     const candidatesRetrieved = candidates.length;
 
-    // 2. Score Candidates
+    // 2. Score Candidates using Python Intelligence Service (RAG & Reranking) with TS Scorer Fallback
     const scoredCandidates: Array<{ record: CognitiveMemoryRecord; score: number }> = [];
-    for (const record of candidates) {
-      const score = await this.scorer.scoreRecord(record, params.objective, scope, {
-        taskDescription: params.objective,
-        requiredCapabilities: params.requiredCapabilities,
-        agentRole: role,
-      });
 
-      if (score > 0) {
-        scoredCandidates.push({ record, score });
+    let pythonRetrievalSuccess = false;
+    if (candidates.length > 0) {
+      try {
+        const pythonRes = await this.pythonClient.retrieveSemanticContext({
+          query: params.objective,
+          candidates: candidates.map((c) => ({
+            id: c.id,
+            title: c.title,
+            content: c.content,
+            projectId: c.projectId,
+            memoryType: c.memoryType,
+            importance: c.importance,
+            validity: c.validity,
+            createdAt: c.createdAt ? new Date(c.createdAt).getTime() : Date.now(),
+            recordRef: c,
+          })),
+          projectId: params.projectId,
+          allowCrossProject: scope.allowCrossProject,
+          limit: budget.maxTotalItems * 2,
+        });
+
+        if (pythonRes.status === "success" && Array.isArray(pythonRes.output?.scoredItems) && pythonRes.output.scoredItems.length > 0) {
+          pythonRetrievalSuccess = true;
+          for (const item of pythonRes.output.scoredItems) {
+            const originalRecord = candidates.find((c) => c.id === item.record.id) || item.record;
+            scoredCandidates.push({
+              record: originalRecord,
+              score: item.compositeScore,
+            });
+          }
+        }
+      } catch (_pyErr) {
+        // Fallback to local TS Scorer
+      }
+    }
+
+    if (!pythonRetrievalSuccess) {
+      for (const record of candidates) {
+        const score = await this.scorer.scoreRecord(record, params.objective, scope, {
+          taskDescription: params.objective,
+          requiredCapabilities: params.requiredCapabilities,
+          agentRole: role,
+        });
+
+        if (score > 0) {
+          scoredCandidates.push({ record, score });
+        }
       }
     }
 
@@ -193,6 +236,9 @@ export class ContextRetrievalEngine {
     const defaultPermissions: ToolPermission[] =
       role === "executor" ? ["READ", "WRITE", "EXECUTE"] : ["READ"];
 
+    // 9. Load Personal Cognitive Patterns
+    const userCognitivePatterns = await this.store.loadUserCognitivePatterns(scope);
+
     const metadata: ContextRetrievalMetadata = {
       candidatesRetrieved,
       itemsSelected: selectedMemories.length,
@@ -213,6 +259,7 @@ export class ContextRetrievalEngine {
       applicableDecisions,
       relevantLessons,
       episodicTraces,
+      userCognitivePatterns,
       activeTasks: params.activeTasks || [],
       agentPermissions: defaultPermissions,
       currentTaskState: params.taskState,

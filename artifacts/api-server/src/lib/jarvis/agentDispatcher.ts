@@ -99,9 +99,6 @@ Perform your specialized work for the assigned task and return JSON ONLY matchin
       suggestedNextAction: parsed.suggestedNextAction || undefined,
     };
   } catch (err) {
-    if (callModelFn) {
-      throw err;
-    }
-    return fallbackAgentResponse(task, agentName);
+    throw err;
   }
 }

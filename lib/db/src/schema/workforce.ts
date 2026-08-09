@@ -108,6 +108,81 @@ export const activitiesTable = pgTable("workforce_activities", {
     .defaultNow(),
 });
 
+export const reasoningArtifactsTable = pgTable("workforce_reasoning_artifacts", {
+  id: text("id").primaryKey(),
+  objective: text("objective").notNull(),
+  complexityLevel: text("complexity_level").notNull(),
+  knownFacts: text("known_facts"),
+  unknowns: text("unknowns"),
+  assumptions: text("assumptions"),
+  constraints: text("constraints"),
+  hypotheses: text("hypotheses"),
+  evidence: text("evidence"),
+  alternativesEvaluated: text("alternatives_evaluated"),
+  tradeoffs: text("tradeoffs"),
+  contradictionsDetected: text("contradictions_detected"),
+  decisionsMade: text("decisions_made"),
+  unresolvedQuestions: text("unresolved_questions"),
+  overallConfidence: integer("overall_confidence").notNull().default(85),
+  nextRecommendedAction: text("next_recommended_action"),
+  projectId: text("project_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const cognitiveStateSnapshotsTable = pgTable("workforce_cognitive_state_snapshots", {
+  snapshotId: text("snapshot_id").primaryKey(),
+  objective: text("objective").notNull(),
+  intentDomain: text("intent_domain"),
+  projectId: text("project_id"),
+  activePlanSummary: text("active_plan_summary"),
+  activeDAGSummary: text("active_dag_summary"),
+  currentTaskId: text("current_task_id"),
+  currentTaskAgentRole: text("current_task_agent_role"),
+  relevantMemories: text("relevant_memories"),
+  currentEvidence: text("current_evidence"),
+  agentOutputsSummary: text("agent_outputs_summary"),
+  knownConstraints: text("known_constraints"),
+  activeDecisions: text("active_decisions"),
+  unresolvedQuestions: text("unresolved_questions"),
+  conflicts: text("conflicts"),
+  risks: text("risks"),
+  nextRecommendedAction: text("next_recommended_action"),
+  reasoningArtifactId: text("reasoning_artifact_id"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const userCognitivePatternsTable = pgTable("workforce_user_cognitive_patterns", {
+  id: text("id").primaryKey(),
+  patternType: text("pattern_type").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  evidence: text("evidence").notNull(),
+  confidence: integer("confidence").notNull().default(50),
+  occurrences: integer("occurrences").notNull().default(1),
+  source: text("source").notNull().default("OBSERVED_INTERACTION"),
+  projectId: text("project_id"),
+  validationStatus: text("validation_status").notNull().default("CANDIDATE"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  lastObservedAt: timestamp("last_observed_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const toolExecutionTracesTable = pgTable("workforce_tool_execution_traces", {
+  id: text("id").primaryKey(),
+  toolId: text("tool_id").notNull(),
+  toolName: text("tool_name").notNull(),
+  agentRole: text("agent_role"),
+  taskId: text("task_id"),
+  input: text("input"),
+  output: text("output"),
+  success: integer("success").notNull().default(1),
+  error: text("error"),
+  executionTimeMs: integer("execution_time_ms").notNull().default(0),
+  permissionClass: text("permission_class").notNull().default("READ"),
+  riskLevel: text("risk_level").notNull().default("low"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const insertConversationSchema = createInsertSchema(
   conversationsTable,
 ).omit({ id: true, createdAt: true, updatedAt: true });

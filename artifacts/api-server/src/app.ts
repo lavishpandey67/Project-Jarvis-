@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
@@ -32,10 +33,16 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api", router);
 
-const staticPath = path.resolve(
-  process.cwd(),
-  "artifacts/personal-ai-workforce/dist/public",
-);
+const candidateStaticPaths = [
+  path.resolve(process.cwd(), "artifacts/personal-ai-workforce/dist/public"),
+  path.resolve(process.cwd(), "../personal-ai-workforce/dist/public"),
+  path.resolve(process.cwd(), "dist/public"),
+];
+
+const staticPath =
+  candidateStaticPaths.find((p) => fs.existsSync(path.join(p, "index.html"))) ||
+  candidateStaticPaths[0];
+
 app.use(express.static(staticPath));
 
 app.use((req, res, next) => {

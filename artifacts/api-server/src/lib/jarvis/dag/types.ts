@@ -16,7 +16,7 @@ export interface TaskGraphNode {
   taskId: string;
   graphId: string;
   description: string;
-  assignedAgentRole: "research" | "strategy" | "builder" | "critic" | "executor";
+  assignedAgentRole: "research" | "strategy" | "builder" | "critic" | "executor" | "generalist_a" | "generalist_b";
   assignedAgentName: string;
   requiredCapabilities: AgentCapability[];
   dependencies: string[]; // List of parent taskId dependencies

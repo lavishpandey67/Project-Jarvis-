@@ -392,9 +392,9 @@ export async function respondWithCompanion(body: unknown) {
 
   const rawWorkspaceData = {
     conversationId: parsed.conversationId,
-    recentMessages: recentMessages.reverse().map((m) => ({ role: m.role, content: m.content })),
-    memories: memoryRows.map((m) => ({ title: m.title, content: m.content, importance: m.importance })),
-    tasks: activeTasks.map((t) => ({ id: t.id, title: t.title, status: t.status })),
+    recentMessages: recentMessages.reverse().map((m: any) => ({ role: m.role, content: m.content })),
+    memories: memoryRows.map((m: any) => ({ title: m.title, content: m.content, importance: m.importance })),
+    tasks: activeTasks.map((t: any) => ({ id: t.id, title: t.title, status: t.status })),
   };
 
   // Run Jarvis Brain Orchestration
@@ -411,7 +411,7 @@ export async function respondWithCompanion(body: unknown) {
   if (jarvisResult.taskGraph && jarvisResult.taskGraph.nodes.length > 0) {
     for (const node of jarvisResult.taskGraph.nodes) {
       const matchedAgent = agentRows.find(
-        (a) => a.role === node.assignedAgentRole || a.name === node.assignedAgentName,
+        (a: any) => a.role === node.assignedAgentRole || a.name === node.assignedAgentName,
       ) ?? agentRows[0];
 
       if (matchedAgent) {
@@ -469,7 +469,7 @@ export async function respondWithCompanion(body: unknown) {
   } else if (jarvisResult.plan.tasks.length > 0) {
     const primaryTask = jarvisResult.plan.tasks[0];
     agentRecord = agentRows.find(
-      (a) => a.role === primaryTask.assignedAgentRole || a.name === primaryTask.assignedAgentName,
+      (a: any) => a.role === primaryTask.assignedAgentRole || a.name === primaryTask.assignedAgentName,
     ) ?? agentRows[0];
 
     if (agentRecord) {

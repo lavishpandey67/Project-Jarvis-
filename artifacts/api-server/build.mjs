@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { copyFile, rm } from "node:fs/promises";
+import { existsSync, readdirSync } from "node:fs";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
@@ -22,11 +23,6 @@ async function buildAll() {
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
-    // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
-    // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
-    // Examples of unbundleable packages:
-    // - uses native modules and loads them dynamically (e.g. sharp)
-    // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
     external: [
       "*.node",
       "sharp",
@@ -118,6 +114,42 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+
+  const candidates = [
+    path.resolve(artifactDir, "../../node_modules/@electric-sql/pglite/dist"),
+    path.resolve(artifactDir, "../../lib/db/node_modules/@electric-sql/pglite/dist"),
+  ];
+  let pgliteDistDir = candidates.find((c) => existsSync(path.resolve(c, "postgres.data")));
+
+  if (!pgliteDistDir) {
+    const pnpmBase = path.resolve(artifactDir, "../../node_modules/.pnpm");
+    if (existsSync(pnpmBase)) {
+      const entries = readdirSync(pnpmBase);
+      for (const entry of entries) {
+        if (entry.startsWith("@electric-sql+pglite")) {
+          const p = path.resolve(pnpmBase, entry, "node_modules/@electric-sql/pglite/dist");
+          if (existsSync(path.resolve(p, "postgres.data"))) {
+            pgliteDistDir = p;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (pgliteDistDir) {
+    await copyFile(
+      path.resolve(pgliteDistDir, "postgres.data"),
+      path.resolve(distDir, "postgres.data")
+    );
+    await copyFile(
+      path.resolve(pgliteDistDir, "postgres.wasm"),
+      path.resolve(distDir, "postgres.wasm")
+    );
+    console.log("Copied PGlite assets to dist successfully from", pgliteDistDir);
+  } else {
+    console.warn("Notice: PGlite assets not found.");
+  }
 }
 
 buildAll().catch((err) => {

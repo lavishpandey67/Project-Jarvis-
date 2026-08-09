@@ -55,7 +55,7 @@ async function runCompoundBatchTests() {
     { permissions: ["READ"] },
   );
   assert(!writeRes.success, "Tool execution with insufficient permission MUST fail");
-  assert(writeRes.error?.includes("Permission Denied"), "Error message should report Permission Denied");
+  assert(Boolean(writeRes.error?.includes("Permission Denied")), "Error message should report Permission Denied");
 
   // Execute WRITE tool with WRITE permission -> Expect Success
   const validWriteRes = await registry.executeTool(
@@ -86,7 +86,7 @@ async function runCompoundBatchTests() {
     { permissions: ["READ", "WRITE", "EXECUTE", "DESTRUCTIVE"], userApprovalGranted: false },
   );
   assert(!destructiveRes.success, "DESTRUCTIVE tool without user approval MUST be blocked");
-  assert(destructiveRes.error?.includes("Safety Guard Violation"), "Error message should mention Safety Guard Violation");
+  assert(Boolean(destructiveRes.error?.includes("Safety Guard Violation")), "Error message should mention Safety Guard Violation");
 
   const approvedDestructiveRes = await registry.executeTool(
     "tool_drop_db",
