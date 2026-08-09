@@ -70,13 +70,12 @@
   - HNSW ANN Partition Bucket Indexing ($M=16$) achieving $3.01\times - 7.58\times$ search speedup over linear scan across 1K, 5K, 10K chunk scale.
   - 38 / 38 Python unit tests passing cleanly.
 
-### 13. Polyglot Code Intelligence & Verified Patch Safety Engine
-- **Implementation:** `PolyglotASTEngine`, `CodebaseGraph`, and `VerifiedPatchSafetyEngine` in `python/intelligence/code_intel/`.
+### 14. Connected End-to-End Intelligence Pipeline
+- **Implementation:** `WebIntelligenceEngine` in `python/intelligence/web/engine.py` and `EndToEndIntelligenceOrchestrator` in `python/intelligence/pipeline/orchestrator.py`.
 - **Verified Behavior:**
-  - Polyglot repository scanner & regex AST symbol parser (class, function, interface, type, import, export).
-  - Dependency graph builder & cross-language boundary detection (`TypeScript -> Python`, `TypeScript -> SQL`, `Python -> PostgreSQL`).
-  - Pre-modification file SHA-256 snapshots, path boundary enforcement (`allowedPaths`), and automated rollback upon test failure.
-  - All 43 / 43 Python unit tests passing cleanly in test suite.
+  - Connected flow: Web Search $\rightarrow$ Source Fetch & Cleaning $\rightarrow$ Provenance (`WORLD_KNOWLEDGE`) $\rightarrow$ Memory Ingestion $\rightarrow$ Embedding $\rightarrow$ Vector Store ($O(\log N)$ ANN) $\rightarrow$ Composite Reranking $\rightarrow$ Grounding Refusal Engine $\rightarrow$ Model Intelligence Router $\rightarrow$ Agent Dispatch $\rightarrow$ Safety Patch $\rightarrow$ Automated Rollback.
+  - Hard invariant: `WORLD_KNOWLEDGE` web search ingestion cannot overwrite `PERSONAL_MEMORY` identity.
+  - All 48 / 48 Python unit tests passing cleanly in test suite.
 
 ---
 
@@ -86,16 +85,18 @@
 |---|---|---|
 | Core Jarvis Brain | **VERIFIED** | Active in `respondWithCompanion` |
 | Agent Workforce | **VERIFIED** | 5 specialized + 2 adaptive agents active & dispatchable |
-| Polyglot Code Intelligence | **VERIFIED** | `PolyglotASTEngine` scanning & regex symbol parser with 43 passing tests |
+| Connected Intelligence Loop | **VERIFIED** | Web $\rightarrow$ RAG $\rightarrow$ Grounding $\rightarrow$ Model Router $\rightarrow$ Agent $\rightarrow$ Patch $\rightarrow$ Rollback passing 48 tests |
+| Web Intelligence Engine | **VERIFIED** | Tavily REST provider & DuckDuckGo sandbox fallback active |
+| Polyglot Code Intelligence | **VERIFIED** | `PolyglotASTEngine` scanning & regex symbol parser with 48 passing tests |
 | Codebase Graph & Boundaries | **VERIFIED** | `CodebaseGraph` building symbol nodes & cross-language boundaries |
 | Verified Patch Safety Engine | **VERIFIED** | Pre-modification SHA-256 snapshots, path boundaries & automated rollback |
-| Memory Lifecycle Manager | **VERIFIED** | Ingest, validate, deduplicate, consolidate, decay, delete with 43 passing tests |
+| Memory Lifecycle Manager | **VERIFIED** | Ingest, validate, deduplicate, consolidate, decay, delete with 48 passing tests |
 | HNSW ANN Vector Index | **VERIFIED** | Partition bucket ANN index achieving 7.58x search speedup at 5,000 chunks |
 | Provenance Protection | **VERIFIED** | Hard invariant: WORLD_KNOWLEDGE cannot overwrite PERSONAL_MEMORY |
 | DAG Orchestration | **VERIFIED** | Topological task graph runner passing unit tests |
 | Memory System (DB) | **VERIFIED** | Drizzle ORM PostgreSQL persistence |
-| Production RAG Engine | **VERIFIED** | Chunking, SHA-256 deduplication, VectorStore, and GroundingEngine passing 43 unit tests |
-| Python Intelligence Layer | **VERIFIED** | RPC & CLI bridge active with 43 passing unit tests |
+| Production RAG Engine | **VERIFIED** | Chunking, SHA-256 deduplication, VectorStore, and GroundingEngine passing 48 unit tests |
+| Python Intelligence Layer | **VERIFIED** | RPC & CLI bridge active with 48 passing unit tests |
 | Vector Math Hardening | **VERIFIED** | NaN/Inf rejection, Euclidean distance, L2 norm, and dimension sanitation tested |
 | Model Intelligence Router | **VERIFIED** | Provider-neutral routing across Reasoning, Coding Agents, Embeddings, and Web Search |
 | RAG Scale Benchmark | **VERIFIED** | Latency benchmark measured across 10, 100, 500, 1K, 5K, 10K, 100K chunks |

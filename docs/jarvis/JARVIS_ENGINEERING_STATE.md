@@ -26,8 +26,10 @@
 | Human Approval Guard | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/approvalGuard.ts` | Safety boundary enforcement and `ESCALATE` verdict escalation policy verified. |
 | DAG Orchestration | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/dag/planner.ts`, `runner.ts` | Topological task graph runner with self-healing revision cycles, lesson memory, budget guard, and recovery integration. |
 | Memory System (DB) | **VERIFIED** | `lib/db/src/schema/workforce.ts`, `artifacts/api-server/src/lib/workforce.ts` | Persistent PostgreSQL CRUD via Drizzle ORM for memories, tasks, activities, conversations. |
-| Production RAG Engine | **VERIFIED** | `python/intelligence/retrieval/ingestion.py`, `vector_store.py` | Document-aware chunking, SHA-256 deduplication, VectorStore, and GroundingEngine verified by 43 tests. |
-| Python Intelligence Layer | **VERIFIED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 43 unit tests. Auto-spawned background daemon bridge. |
+| Production RAG Engine | **VERIFIED** | `python/intelligence/retrieval/ingestion.py`, `vector_store.py` | Document-aware chunking, SHA-256 deduplication, VectorStore, and GroundingEngine verified by 48 tests. |
+| Python Intelligence Layer | **VERIFIED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 48 unit tests. Auto-spawned background daemon bridge. |
+| Connected Intelligence Loop | **VERIFIED** | `python/intelligence/pipeline/orchestrator.py` | Web $\rightarrow$ RAG $\rightarrow$ Grounding $\rightarrow$ Model Router $\rightarrow$ Agent $\rightarrow$ Patch $\rightarrow$ Rollback verified by 48 tests. |
+| Web Intelligence Engine | **VERIFIED** | `python/intelligence/web/engine.py` | Tavily REST provider & DuckDuckGo sandbox fallback active with HTML sanitization & provenance tracking. |
 | Polyglot Code Intelligence | **VERIFIED** | `python/intelligence/code_intel/ast_engine.py` | AST repository scanning & symbol extraction verified by 43 unit tests. |
 | Codebase Graph & Boundaries | **VERIFIED** | `python/intelligence/code_intel/codebase_graph.py` | Codebase dependency graph and cross-language boundary detection verified by tests. |
 | Verified Patch Safety Engine | **VERIFIED** | `python/intelligence/code_intel/patch_engine.py` | Pre-modification SHA-256 snapshots, path boundaries, and automated rollback engine verified. |

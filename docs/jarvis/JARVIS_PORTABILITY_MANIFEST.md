@@ -45,6 +45,8 @@ Project-Jarvis-/
 |---|---|---|---|
 | Core Jarvis Brain | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/` | `POST /api/companion/respond` |
 | Agent Workforce (5 Specialists) | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/registry.ts` | `dispatchToAgent()` |
+| Connected Intelligence Loop | **VERIFIED** | `python/intelligence/pipeline/orchestrator.py` | Web $\rightarrow$ RAG $\rightarrow$ Grounding $\rightarrow$ Model Router $\rightarrow$ Agent $\rightarrow$ Patch $\rightarrow$ Rollback |
+| Web Intelligence Engine | **VERIFIED** | `python/intelligence/web/engine.py` | Tavily REST provider & DuckDuckGo sandbox fallback |
 | Polyglot Code Intelligence | **VERIFIED** | `python/intelligence/code_intel/ast_engine.py` | AST repository scanning & symbol extraction |
 | Codebase Graph & Boundaries | **VERIFIED** | `python/intelligence/code_intel/codebase_graph.py` | Dependency graph & cross-language boundary detection |
 | Verified Patch Safety Engine | **VERIFIED** | `python/intelligence/code_intel/patch_engine.py` | Pre-modification SHA-256 snapshots & automated rollback |
