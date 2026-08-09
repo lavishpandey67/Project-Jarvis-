@@ -26,8 +26,10 @@
 | Human Approval Guard | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/approvalGuard.ts` | Safety boundary enforcement and `ESCALATE` verdict escalation policy verified. |
 | DAG Orchestration | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/dag/planner.ts`, `runner.ts` | Topological task graph runner with self-healing revision cycles, lesson memory, budget guard, and recovery integration. |
 | Memory System (DB) | **VERIFIED** | `lib/db/src/schema/workforce.ts`, `artifacts/api-server/src/lib/workforce.ts` | Persistent PostgreSQL CRUD via Drizzle ORM for memories, tasks, activities, conversations. |
-| Production RAG Engine | **VERIFIED** | `python/intelligence/retrieval/ingestion.py`, `vector_store.py` | Document-aware chunking, SHA-256 deduplication, VectorStore, and GroundingEngine verified by 48 tests. |
-| Python Intelligence Layer | **VERIFIED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 48 unit tests. Auto-spawned background daemon bridge. |
+| Production RAG Engine | **VERIFIED** | `python/intelligence/retrieval/ingestion.py`, `vector_store.py` | Document-aware chunking, SHA-256 deduplication, VectorStore, and GroundingEngine verified by 52 tests. |
+| Python Intelligence Layer | **VERIFIED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 52 unit tests. Auto-spawned background daemon bridge. |
+| Autonomous Build-Repair Loop | **VERIFIED** | `python/intelligence/devops/build_repair_engine.py` | Self-healing repair cycle, log diagnostics, and LESSON memory recording verified by 52 tests. |
+| DevOps Deployment Engine | **VERIFIED** | `python/intelligence/devops/build_repair_engine.py` | Docker deployment manifest & system health check verified by 52 unit tests. |
 | Connected Intelligence Loop | **VERIFIED** | `python/intelligence/pipeline/orchestrator.py` | Web $\rightarrow$ RAG $\rightarrow$ Grounding $\rightarrow$ Model Router $\rightarrow$ Agent $\rightarrow$ Patch $\rightarrow$ Rollback verified by 48 tests. |
 | Web Intelligence Engine | **VERIFIED** | `python/intelligence/web/engine.py` | Tavily REST provider & DuckDuckGo sandbox fallback active with HTML sanitization & provenance tracking. |
 | Polyglot Code Intelligence | **VERIFIED** | `python/intelligence/code_intel/ast_engine.py` | AST repository scanning & symbol extraction verified by 43 unit tests. |
