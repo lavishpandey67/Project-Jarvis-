@@ -45,6 +45,8 @@ Project-Jarvis-/
 |---|---|---|---|
 | Core Jarvis Brain | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/` | `POST /api/companion/respond` |
 | Agent Workforce (5 Specialists) | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/registry.ts` | `dispatchToAgent()` |
+| Memory Lifecycle Manager | **VERIFIED** | `python/intelligence/retrieval/memory_lifecycle.py` | Full software memory lifecycle & provenance boundary |
+| HNSW ANN Vector Index | **VERIFIED** | `python/intelligence/retrieval/vector_store.py` | Partition bucket ANN index with 7.58x search speedup |
 | Security & Permission Gate | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/tools/registry.ts` | Tool permission rank enforcement & audit trace |
 | Bounded Recovery Controller | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/recoveryController.ts` | Failure classification & file snapshot rollback |
 | Budget Controller Guard | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/budgetController.ts` | Task, token, time, and cost budget enforcement |
