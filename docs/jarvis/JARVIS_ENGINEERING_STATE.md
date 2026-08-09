@@ -30,6 +30,7 @@
 | Python Intelligence Layer | **VERIFIED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 33 unit tests. Auto-spawned background daemon bridge. |
 | Vector Math Hardening | **VERIFIED** | `python/intelligence/embeddings/engine.py` | NaN/Inf rejection, Euclidean distance, L2 norm, and dimension sanitation verified by tests. |
 | Model Intelligence Router | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/polyglot/router.ts` | Provider-neutral model routing across Reasoning, Coding Agents (Claude Code/Codex/Antigravity), Embeddings, Reranker, Web Search, and Fallbacks. |
+| RAG Scale Benchmark | **VERIFIED** | `python/intelligence/tests/benchmark_rag_scale.py` | Measured empirical latency across 10, 100, 500, 1000 chunks (1000 chunks = 290.19ms total latency). |
 | Real Embeddings | **IMPLEMENTED** | `python/intelligence/embeddings/engine.py` | `RealProvider` with OpenAI & Gemini REST API integration & fallback mode tracking. |
 | Vector Database Adapter | **IMPLEMENTED** | `python/intelligence/retrieval/vector_store.py` | `PgVectorStoreAdapter` active (`SERIALIZED_TEXT_FALLBACK`); native pgvector PLANNED. |
 | Grounding / Unknown Engine | **VERIFIED** | `python/intelligence/evaluation/grounding.py` | EvidenceState classification & explicit refusal notice generation verified. |

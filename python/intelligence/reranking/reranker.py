@@ -28,9 +28,19 @@ class RerankingEngine:
         if total > 0:
             self.weights = {k: v / total for k, v in self.weights.items()}
 
-    def _calculate_recency_score(self, timestamp_ms: Optional[float], half_life_days: float = 7.0) -> float:
-        if not timestamp_ms:
+    def _calculate_recency_score(self, timestamp_val: Optional[Any], half_life_days: float = 7.0) -> float:
+        if not timestamp_val:
             return 0.5
+        try:
+            if isinstance(timestamp_val, (int, float)):
+                timestamp_ms = float(timestamp_val)
+            else:
+                import datetime
+                dt = datetime.datetime.fromisoformat(str(timestamp_val).replace("Z", "+00:00"))
+                timestamp_ms = dt.timestamp() * 1000
+        except Exception:
+            return 0.5
+
         now_ms = time.time() * 1000
         age_days = max(0.0, (now_ms - timestamp_ms) / (1000.0 * 86400.0))
         decay_constant = math.log(2) / half_life_days

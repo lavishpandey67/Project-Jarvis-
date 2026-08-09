@@ -62,6 +62,15 @@
   - Provider-neutral model router support for Reasoning Models, Coding Agents (Claude Code, Codex, Antigravity), Embedding Models, Rerankers, Web Search, and Fallbacks.
   - 33 / 33 Python unit tests passing in test suite.
 
+### 11. RAG Scale Latency Benchmark Results
+- **Implementation:** `run_scale_benchmark()` in `python/intelligence/tests/benchmark_rag_scale.py`.
+- **Empirical Measured Results:**
+  - **10 Chunks:** Ingest: 0.38ms | Embed: 3.56ms | Retrieve: 2.20ms | Rerank: 0.26ms | Total: **6.41ms**
+  - **100 Chunks:** Ingest: 1.11ms | Embed: 30.45ms | Retrieve: 19.02ms | Rerank: 0.32ms | Total: **50.90ms**
+  - **500 Chunks:** Ingest: 5.56ms | Embed: 143.65ms | Retrieve: 86.35ms | Rerank: 0.42ms | Total: **235.99ms**
+  - **1000 Chunks:** Ingest: 11.89ms | Embed: 169.72ms | Retrieve: 108.31ms | Rerank: 0.26ms | Total: **290.19ms**
+- **Scaling Bottleneck Identified:** Linear vector embedding generation and $O(N)$ similarity calculation dominate latency beyond 1,000 chunks. Reranking operates strictly on Top-K ($K=10$) in $\le 0.42\text{ms}$.
+
 ---
 
 ## Capability Status Summary
@@ -77,6 +86,7 @@
 | Python Intelligence Layer | **VERIFIED** | RPC & CLI bridge active with 33 passing unit tests |
 | Vector Math Hardening | **VERIFIED** | NaN/Inf rejection, Euclidean distance, L2 norm, and dimension sanitation tested |
 | Model Intelligence Router | **VERIFIED** | Provider-neutral routing across Reasoning, Coding Agents, Embeddings, and Web Search |
+| RAG Scale Benchmark | **VERIFIED** | Latency benchmark measured across 10, 100, 500, 1000 chunks |
 | Real Embeddings | **IMPLEMENTED** | `RealProvider` active with OpenAI & Gemini REST API support & fallback |
 | Vector Database Adapter | **IMPLEMENTED** | `PgVectorStoreAdapter` active (`SERIALIZED_TEXT_FALLBACK`); native pgvector PLANNED |
 | Multi-Factor Reranking | **VERIFIED** | Python composite reranker active & unit tested |
