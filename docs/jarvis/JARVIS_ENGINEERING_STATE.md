@@ -26,10 +26,12 @@
 | Human Approval Guard | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/approvalGuard.ts` | Safety boundary enforcement and `ESCALATE` verdict escalation policy verified. |
 | DAG Orchestration | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/dag/planner.ts`, `runner.ts` | Topological task graph runner with self-healing revision cycles, lesson memory, budget guard, and recovery integration. |
 | Memory System (DB) | **VERIFIED** | `lib/db/src/schema/workforce.ts`, `artifacts/api-server/src/lib/workforce.ts` | Persistent PostgreSQL CRUD via Drizzle ORM for memories, tasks, activities, conversations. |
-| RAG / Context Engine | **INTEGRATED** | `artifacts/api-server/src/lib/jarvis/memory/contextEngine.ts` | `ContextRetrievalEngine` wired into `respondWithCompanion()` with deterministic memory sync. |
-| Python Intelligence Layer | **INTEGRATED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 16 unit tests. Auto-spawned background daemon bridge. |
-| Real Embeddings | **IMPLEMENTED** | `python/intelligence/embeddings/engine.py` | `RealProvider` with OpenAI REST API integration & fallback mode tracking. |
-| Vector Database | **IMPLEMENTED** | `lib/db/src/schema/workforce.ts` | `embedding: text("embedding")` column added for serialized vector float arrays. pgvector PLANNED. |
+| Production RAG Engine | **VERIFIED** | `python/intelligence/retrieval/ingestion.py`, `vector_store.py` | Document-aware chunking, SHA-256 deduplication, VectorStore, and GroundingEngine verified by 28 tests. |
+| Python Intelligence Layer | **VERIFIED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 28 unit tests. Auto-spawned background daemon bridge. |
+| Real Embeddings | **IMPLEMENTED** | `python/intelligence/embeddings/engine.py` | `RealProvider` with OpenAI & Gemini REST API integration & fallback mode tracking. |
+| Vector Database Adapter | **IMPLEMENTED** | `python/intelligence/retrieval/vector_store.py` | `PgVectorStoreAdapter` active (`SERIALIZED_TEXT_FALLBACK`); native pgvector PLANNED. |
+| Grounding / Unknown Engine | **VERIFIED** | `python/intelligence/evaluation/grounding.py` | EvidenceState classification & explicit refusal notice generation verified. |
+| Retrieval Evaluator | **VERIFIED** | `python/intelligence/evaluation/rag_eval.py` | Recall@K, Precision@K, MRR metrics benchmarked on test fixtures. |
 | Multi-Factor Reranking | **VERIFIED** | `python/intelligence/reranking/reranker.py` | Reranking formula combining similarity, recency, importance, confidence, project relevance passing 16 unit tests. |
 | Personal Cognition & Identity | **IMPLEMENTED** | `python/intelligence/cognitive/models.py`, `artifacts/api-server/src/lib/jarvis/memory/patternTracker.ts` | Classes `UserPreferenceModel` and `TaskDifficultyPredictor` exist using rule-based heuristics. |
 | Project Memory Isolation | **IMPLEMENTED** | `python/intelligence/retrieval/semantic.py`, `artifacts/api-server/src/lib/jarvis/memory/scorer.ts` | Filtering logic checking `projectId === target_project_id` tested in memory modules. |

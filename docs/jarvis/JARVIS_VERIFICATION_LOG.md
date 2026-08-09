@@ -54,6 +54,14 @@
   - Enforces `DESTRUCTIVE` permission class boundaries and high-risk safety policies.
   - Automatically returns `ESCALATE` verdict and halts execution when unapproved destructive operations are requested.
 
+### 9. Production RAG Foundation & Vector Intelligence Engine
+- **Implementation:** `IngestionPipeline`, `DocumentChunker`, `DevelopmentVectorStore`, `PgVectorStoreAdapter`, `GroundingEngine`, and `RAGEvaluator` in `python/intelligence/retrieval/` and `evaluation/`.
+- **Verified Behavior:**
+  - Document-aware chunking with section header inheritance, overlap control, and SHA-256 content hash deduplication.
+  - In-memory `DevelopmentVectorStore` and `PgVectorStoreAdapter` with dimension normalization and project isolation filters.
+  - `GroundingEngine` evidence state classification (`KNOWN`, `INFERRED`, `UNCERTAIN`, `UNKNOWN`, `CONTRADICTED`) and refusal notice generation.
+  - `RAGEvaluator` benchmark calculation (Recall@K = 0.5, MRR = 1.0, Precision@K).
+
 ---
 
 ## Capability Status Summary
@@ -65,13 +73,10 @@
 | Adaptive Agents | **VERIFIED** | `adaptGeneralistRole()` dynamic profile assignment active |
 | DAG Orchestration | **VERIFIED** | Topological task graph runner passing unit tests |
 | Memory System (DB) | **VERIFIED** | Drizzle ORM PostgreSQL persistence |
-| RAG / Context Engine | **INTEGRATED** | `ContextRetrievalEngine` wired into `respondWithCompanion` |
-| Python Intelligence Layer | **INTEGRATED** | RPC & CLI bridge active with 22 passing unit tests |
+| Production RAG Engine | **VERIFIED** | Chunking, SHA-256 deduplication, VectorStore, and GroundingEngine passing 28 unit tests |
+| Python Intelligence Layer | **VERIFIED** | RPC & CLI bridge active with 28 passing unit tests |
 | Real Embeddings | **IMPLEMENTED** | `RealProvider` active with OpenAI & Gemini REST API support & fallback |
-| Vector Database | **IMPLEMENTED** | Database `embedding` text column added; pgvector PLANNED |
+| Vector Database Adapter | **IMPLEMENTED** | `PgVectorStoreAdapter` implemented (`SERIALIZED_TEXT_FALLBACK`); native pgvector PLANNED |
 | Multi-Factor Reranking | **VERIFIED** | Python composite reranker active & unit tested |
-| Security & Permission Gate | **VERIFIED** | Contract permissions & CriticGate active |
-| Self-Healing Feedback Loop | **VERIFIED** | Automatic `LESSON` memory generation on task revision |
-| Bounded Recovery Controller | **VERIFIED** | `RecoveryController` failure classification & file rollback engine |
-| Budget Controller Guard | **VERIFIED** | `BudgetController` token, time, task, and cost budget limits |
-| Human Approval Guard | **VERIFIED** | `HumanApprovalGuard` DESTRUCTIVE class & escalation policy |
+| Grounding / Unknown Engine | **VERIFIED** | EvidenceState classification & explicit refusal notice active |
+| Retrieval Evaluator | **VERIFIED** | Recall@K, Precision@K, MRR metrics benchmarked |
