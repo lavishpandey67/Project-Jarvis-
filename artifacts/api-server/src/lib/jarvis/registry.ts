@@ -174,6 +174,63 @@ export function clearAdaptiveTaskProfile(agentId: string): void {
   activeRoleProfiles.delete(agentId);
 }
 
+/**
+ * Helper to adapt generalists dynamically into specialized operational profiles:
+ * 'debugger' | 'security_engineer' | 'performance_engineer' | 'devops_engineer' | 'test_engineer' | 'recovery_engineer' | 'code_reviewer'
+ */
+export function adaptGeneralistRole(
+  agentId: "agent_generalist_a" | "agent_generalist_b",
+  targetRole: "debugger" | "security_engineer" | "performance_engineer" | "devops_engineer" | "test_engineer" | "recovery_engineer" | "code_reviewer",
+): TaskRoleProfile {
+  const profileMap: Record<string, { capabilities: AgentCapability[]; tools: string[]; permissions: ToolPermissionClass[] }> = {
+    debugger: {
+      capabilities: ["debugging", "refactoring", "code_generation", "evaluation"],
+      tools: ["tool_file_read", "tool_file_write", "tool_memory_search"],
+      permissions: ["READ", "WRITE"],
+    },
+    security_engineer: {
+      capabilities: ["risk_analysis", "adversarial_review", "validation", "evaluation"],
+      tools: ["tool_file_read", "tool_memory_search"],
+      permissions: ["READ"],
+    },
+    performance_engineer: {
+      capabilities: ["refactoring", "implementation", "decision_analysis"],
+      tools: ["tool_file_read", "tool_file_write"],
+      permissions: ["READ", "WRITE"],
+    },
+    devops_engineer: {
+      capabilities: ["approved_tool_execution", "workspace_operations"],
+      tools: ["tool_file_read", "tool_file_write", "tool_create_task"],
+      permissions: ["READ", "WRITE", "EXECUTE"],
+    },
+    test_engineer: {
+      capabilities: ["testing", "validation", "evaluation"],
+      tools: ["tool_file_read", "tool_file_write", "tool_create_note"],
+      permissions: ["READ", "WRITE"],
+    },
+    recovery_engineer: {
+      capabilities: ["debugging", "refactoring", "workspace_operations", "evaluation"],
+      tools: ["tool_file_read", "tool_file_write", "tool_memory_search"],
+      permissions: ["READ", "WRITE", "EXECUTE"],
+    },
+    code_reviewer: {
+      capabilities: ["contradiction_detection", "adversarial_review", "evaluation"],
+      tools: ["tool_file_read", "tool_memory_search"],
+      permissions: ["READ"],
+    },
+  };
+
+  const config = profileMap[targetRole] || profileMap.debugger;
+  return assignAdaptiveTaskProfile(
+    agentId,
+    targetRole,
+    config.capabilities,
+    config.tools,
+    config.permissions,
+    60,
+  );
+}
+
 export function getAgentByRole(role: string): AgentContract | undefined {
   return ALL_WORKFORCE_AGENTS.find((agent) => agent.role === role);
 }

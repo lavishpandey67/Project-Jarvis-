@@ -1,6 +1,7 @@
 import { dispatchToAgent } from "../agentDispatcher";
 import { evaluateTaskResult } from "../eval/evaluator";
 import { ModelCaller } from "../intentAnalyzer";
+import { CognitiveMemoryStore } from "../memory/store";
 import { JarvisTaskNode, ScopedContext } from "../types";
 import {
   DAGExecutionResult,
@@ -191,6 +192,22 @@ export async function executeTaskGraph(
           transitionTaskStatus(node, "PARTIAL");
           executionSuccess = true;
         } else if (evalRes.verdict === "REVISE") {
+          // Record self-healing lesson memory
+          try {
+            const memoryStore = CognitiveMemoryStore.getInstance();
+            await memoryStore.addMemory({
+              id: `lesson_${node.taskId}_${Date.now()}`,
+              memoryType: "LESSON",
+              title: `Lesson Learned: ${node.assignedAgentName} Task Revision`,
+              content: `Task '${node.taskId}' revision cycle ${node.revisionCount + 1}: ${evalRes.failureReasons.join("; ")}. Corrections: ${evalRes.requiredCorrections.join("; ")}`,
+              source: "SYSTEM",
+              confidence: 0.95,
+              importance: 4,
+            });
+          } catch (_memErr) {
+            // Ignored
+          }
+
           if (node.revisionCount < node.maxRevisionCycles) {
             node.revisionCount += 1;
             trace.revisionCycle = node.revisionCount;

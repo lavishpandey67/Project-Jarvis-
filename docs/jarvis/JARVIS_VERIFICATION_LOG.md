@@ -40,6 +40,12 @@
 - **Verified Path:** `respondWithCompanion` $\rightarrow$ DB memory sync $\rightarrow$ `ContextRetrievalEngine` $\rightarrow$ `PythonIntelligenceClient` $\rightarrow$ Python RAG Retrieval & Reranker $\rightarrow$ `ScopedContextPackage` $\rightarrow$ `processWithJarvisBrain`.
 - **Logged Activity:** `rag_retrieval` activity log recorded on every request with latency and item count.
 
+### 5. Adaptive Workforce & Self-Healing Loop
+- **Implementation:** `adaptGeneralistRole()` in `registry.ts` and automated `LESSON` memory creation in `dag/runner.ts`.
+- **Verified Behavior:**
+  - Adaptive generalist agents (`agent_generalist_a` / `agent_generalist_b`) dynamically assume operational profiles (`debugger`, `security_engineer`, `performance_engineer`, `devops_engineer`, `test_engineer`, `recovery_engineer`, `code_reviewer`).
+  - Self-healing revision feedback loop in `runner.ts` automatically records `LESSON` memory records when tasks fail evaluation or require revision.
+
 ---
 
 ## Capability Status Summary
@@ -47,12 +53,14 @@
 | Capability | Verified Status | Verification Evidence |
 |---|---|---|
 | Core Jarvis Brain | **VERIFIED** | Active in `respondWithCompanion` |
-| Agent Workforce | **VERIFIED** | 5 contracts dispatched in DAG |
-| DAG Orchestration | **VERIFIED** | Topological graph runner passing unit tests |
+| Agent Workforce | **VERIFIED** | 5 specialized + 2 adaptive agents active & dispatchable |
+| Adaptive Agents | **VERIFIED** | `adaptGeneralistRole()` dynamic profile assignment active |
+| DAG Orchestration | **VERIFIED** | Topological task graph runner passing unit tests |
 | Memory System (DB) | **VERIFIED** | Drizzle ORM PostgreSQL persistence |
 | RAG / Context Engine | **INTEGRATED** | `ContextRetrievalEngine` wired into `respondWithCompanion` |
 | Python Intelligence Layer | **INTEGRATED** | RPC & CLI bridge active with 16 passing unit tests |
-| Real Embeddings | **IMPLEMENTED** | `RealProvider` active with OpenAI REST API support & fallback |
+| Real Embeddings | **IMPLEMENTED** | `RealProvider` active with OpenAI & Gemini REST API support & fallback |
 | Vector Database | **IMPLEMENTED** | Database `embedding` text column added; pgvector PLANNED |
 | Multi-Factor Reranking | **VERIFIED** | Python composite reranker active & unit tested |
 | Security & Permission Gate | **VERIFIED** | Contract permissions & CriticGate active |
+| Self-Healing Feedback Loop | **VERIFIED** | Automatic `LESSON` memory generation on task revision |
