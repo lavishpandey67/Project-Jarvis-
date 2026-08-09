@@ -224,3 +224,141 @@ export class TechnologyRouter {
     };
   }
 }
+
+export type ModelSubsystemCategory =
+  | "REASONING"
+  | "CODING_AGENT"
+  | "EMBEDDING"
+  | "RERANKER"
+  | "WEB_SEARCH"
+  | "LOCAL_FALLBACK";
+
+export interface ModelRoutingDecision {
+  subsystem: ModelSubsystemCategory;
+  selectedProvider: string;
+  selectedModel: string;
+  offlineAvailable: boolean;
+  confidence: number;
+  reasoning: string;
+  fallbackChain: string[];
+}
+
+export class ModelIntelligenceRouter {
+  /**
+   * Provider-neutral routing for reasoning models, coding agents, embeddings, rerankers, web search, and fallbacks.
+   */
+  public routeModelRequest(
+    subsystem: ModelSubsystemCategory,
+    preferOffline: boolean = false
+  ): ModelRoutingDecision {
+    const hasOpenAI = Boolean(process.env.OPENAI_API_KEY);
+    const hasGemini = Boolean(process.env.GEMINI_API_KEY);
+    const hasTavily = Boolean(process.env.TAVILY_API_KEY);
+
+    if (subsystem === "CODING_AGENT") {
+      if (preferOffline) {
+        return {
+          subsystem,
+          selectedProvider: "AntigravityLocalExecution",
+          selectedModel: "antigravity-code-local",
+          offlineAvailable: true,
+          confidence: 0.85,
+          reasoning: "Selected local sandboxed code execution engine.",
+          fallbackChain: ["LocalDeterministicSynthesis"],
+        };
+      }
+      return {
+        subsystem,
+        selectedProvider: hasOpenAI ? "CodexProvider" : "ClaudeCodeProvider",
+        selectedModel: hasOpenAI ? "code-davinci-002" : "claude-3-5-sonnet",
+        offlineAvailable: false,
+        confidence: 0.92,
+        reasoning: "Selected top-tier coding agent provider for static analysis and patch generation.",
+        fallbackChain: ["AntigravityLocalExecution", "LocalDeterministicSynthesis"],
+      };
+    }
+
+    if (subsystem === "EMBEDDING") {
+      if (hasOpenAI) {
+        return {
+          subsystem,
+          selectedProvider: "OpenAIEmbeddingProvider",
+          selectedModel: "text-embedding-3-small",
+          offlineAvailable: false,
+          confidence: 0.95,
+          reasoning: "Selected OpenAI real embedding API (384 dimensions).",
+          fallbackChain: ["DevelopmentFallbackProvider"],
+        };
+      }
+      if (hasGemini) {
+        return {
+          subsystem,
+          selectedProvider: "GeminiEmbeddingProvider",
+          selectedModel: "text-embedding-004",
+          offlineAvailable: false,
+          confidence: 0.92,
+          reasoning: "Selected Gemini real embedding API (384 dimensions).",
+          fallbackChain: ["DevelopmentFallbackProvider"],
+        };
+      }
+      return {
+        subsystem,
+        selectedProvider: "DevelopmentFallbackProvider",
+        selectedModel: "sha256-md5-ngram-feature-hashing",
+        offlineAvailable: true,
+        confidence: 0.80,
+        reasoning: "Selected deterministic 384-dimensional n-gram feature hashing fallback vectorizer.",
+        fallbackChain: [],
+      };
+    }
+
+    if (subsystem === "WEB_SEARCH") {
+      return {
+        subsystem,
+        selectedProvider: hasTavily ? "TavilyWebSearchProvider" : "DuckDuckGoSandboxSearch",
+        selectedModel: hasTavily ? "tavily-search-api" : "ddg-html-sanitizer",
+        offlineAvailable: !hasTavily,
+        confidence: hasTavily ? 0.90 : 0.75,
+        reasoning: hasTavily ? "Selected live web search via Tavily API." : "Selected provider-agnostic sandbox web search.",
+        fallbackChain: ["DuckDuckGoSandboxSearch"],
+      };
+    }
+
+    if (subsystem === "RERANKER") {
+      return {
+        subsystem,
+        selectedProvider: "PythonCompositeReranker",
+        selectedModel: "multi-factor-weighted-composite-scorer",
+        offlineAvailable: true,
+        confidence: 0.90,
+        reasoning: "Selected Python multi-factor composite reranker.",
+        fallbackChain: [],
+      };
+    }
+
+    // Default REASONING model
+    if (preferOffline || (!hasOpenAI && !hasGemini)) {
+      return {
+        subsystem: "LOCAL_FALLBACK",
+        selectedProvider: "LocalDeterministicSynthesis",
+        selectedModel: "jarvis-local-cognitive-synthesis",
+        offlineAvailable: true,
+        confidence: 0.75,
+        reasoning: "Operating in local synthesis fallback mode.",
+        fallbackChain: [],
+      };
+    }
+
+    return {
+      subsystem: "REASONING",
+      selectedProvider: hasOpenAI ? "OpenAIProvider" : "GeminiProvider",
+      selectedModel: hasOpenAI ? "gpt-4o" : "gemini-1.5-pro",
+      offlineAvailable: false,
+      confidence: 0.95,
+      reasoning: "Selected top reasoning model provider.",
+      fallbackChain: ["LocalDeterministicSynthesis"],
+    };
+  }
+}
+
+export const globalModelRouter = new ModelIntelligenceRouter();

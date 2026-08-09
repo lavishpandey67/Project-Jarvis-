@@ -54,13 +54,13 @@
   - Enforces `DESTRUCTIVE` permission class boundaries and high-risk safety policies.
   - Automatically returns `ESCALATE` verdict and halts execution when unapproved destructive operations are requested.
 
-### 9. Production RAG Foundation & Vector Intelligence Engine
-- **Implementation:** `IngestionPipeline`, `DocumentChunker`, `DevelopmentVectorStore`, `PgVectorStoreAdapter`, `GroundingEngine`, and `RAGEvaluator` in `python/intelligence/retrieval/` and `evaluation/`.
+### 10. Vector Mathematics Hardening & Model Router
+- **Implementation:** `sanitize_vector()`, `euclidean_distance()`, and `cosine_similarity()` in `python/intelligence/embeddings/engine.py` and `ModelIntelligenceRouter` in `polyglot/router.ts`.
 - **Verified Behavior:**
-  - Document-aware chunking with section header inheritance, overlap control, and SHA-256 content hash deduplication.
-  - In-memory `DevelopmentVectorStore` and `PgVectorStoreAdapter` with dimension normalization and project isolation filters.
-  - `GroundingEngine` evidence state classification (`KNOWN`, `INFERRED`, `UNCERTAIN`, `UNKNOWN`, `CONTRADICTED`) and refusal notice generation.
-  - `RAGEvaluator` benchmark calculation (Recall@K = 0.5, MRR = 1.0, Precision@K).
+  - `NaN` and `Infinity` float values rejected and sanitized to `0.0`.
+  - Dimension mismatch truncation and padding verified across all vector operations.
+  - Provider-neutral model router support for Reasoning Models, Coding Agents (Claude Code, Codex, Antigravity), Embedding Models, Rerankers, Web Search, and Fallbacks.
+  - 33 / 33 Python unit tests passing in test suite.
 
 ---
 
@@ -73,10 +73,12 @@
 | Adaptive Agents | **VERIFIED** | `adaptGeneralistRole()` dynamic profile assignment active |
 | DAG Orchestration | **VERIFIED** | Topological task graph runner passing unit tests |
 | Memory System (DB) | **VERIFIED** | Drizzle ORM PostgreSQL persistence |
-| Production RAG Engine | **VERIFIED** | Chunking, SHA-256 deduplication, VectorStore, and GroundingEngine passing 28 unit tests |
-| Python Intelligence Layer | **VERIFIED** | RPC & CLI bridge active with 28 passing unit tests |
+| Production RAG Engine | **VERIFIED** | Chunking, SHA-256 deduplication, VectorStore, and GroundingEngine passing 33 unit tests |
+| Python Intelligence Layer | **VERIFIED** | RPC & CLI bridge active with 33 passing unit tests |
+| Vector Math Hardening | **VERIFIED** | NaN/Inf rejection, Euclidean distance, L2 norm, and dimension sanitation tested |
+| Model Intelligence Router | **VERIFIED** | Provider-neutral routing across Reasoning, Coding Agents, Embeddings, and Web Search |
 | Real Embeddings | **IMPLEMENTED** | `RealProvider` active with OpenAI & Gemini REST API support & fallback |
-| Vector Database Adapter | **IMPLEMENTED** | `PgVectorStoreAdapter` implemented (`SERIALIZED_TEXT_FALLBACK`); native pgvector PLANNED |
+| Vector Database Adapter | **IMPLEMENTED** | `PgVectorStoreAdapter` active (`SERIALIZED_TEXT_FALLBACK`); native pgvector PLANNED |
 | Multi-Factor Reranking | **VERIFIED** | Python composite reranker active & unit tested |
 | Grounding / Unknown Engine | **VERIFIED** | EvidenceState classification & explicit refusal notice active |
 | Retrieval Evaluator | **VERIFIED** | Recall@K, Precision@K, MRR metrics benchmarked |

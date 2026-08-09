@@ -37,10 +37,11 @@ class DevelopmentFallbackProvider(EmbeddingProvider):
         super().__init__(vector_dim=vector_dim)
 
     def _normalize(self, vec: List[float]) -> List[float]:
-        norm = math.sqrt(sum(x * x for x in vec))
+        clean_vec = sanitize_vector(vec, self.vector_dim)
+        norm = math.sqrt(sum(x * x for x in clean_vec))
         if norm < 1e-12:
-            return [0.0] * len(vec)
-        return [float(x / norm) for x in vec]
+            return [0.0] * len(clean_vec)
+        return [float(x / norm) for x in clean_vec]
 
     def embed_text(self, text: str) -> List[float]:
         if not text or not text.strip():
@@ -195,17 +196,57 @@ class RealProvider(EmbeddingProvider):
         }
 
 
-def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
-    """Calculates cosine similarity between two normalized float vectors."""
-    if not vec_a or not vec_b or len(vec_a) != len(vec_b):
+def sanitize_vector(vec: List[float], expected_dim: int = 384) -> List[float]:
+    """Sanitizes raw float vectors by rejecting NaN/Infinity and enforcing exact dimension bounds."""
+    if not vec:
+        return [0.0] * expected_dim
+
+    sanitized = []
+    for x in vec:
+        try:
+            val = float(x)
+            if math.isnan(val) or math.isinf(val):
+                sanitized.append(0.0)
+            else:
+                sanitized.append(val)
+        except (ValueError, TypeError):
+            sanitized.append(0.0)
+
+    if len(sanitized) > expected_dim:
+        return sanitized[:expected_dim]
+    elif len(sanitized) < expected_dim:
+        return sanitized + [0.0] * (expected_dim - len(sanitized))
+    return sanitized
+
+
+def euclidean_distance(vec_a: List[float], vec_b: List[float]) -> float:
+    """Calculates Euclidean (L2) distance between two float vectors."""
+    if not vec_a or not vec_b:
         return 0.0
-    
-    dot = sum(a * b for a, b in zip(vec_a, vec_b))
-    norm_a = math.sqrt(sum(a * a for a in vec_a))
-    norm_b = math.sqrt(sum(b * b for b in vec_b))
-    
+
+    dim = max(len(vec_a), len(vec_b))
+    a_clean = sanitize_vector(vec_a, dim)
+    b_clean = sanitize_vector(vec_b, dim)
+
+    dist_sq = sum((a - b) ** 2 for a, b in zip(a_clean, b_clean))
+    return float(math.sqrt(dist_sq))
+
+
+def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
+    """Calculates cosine similarity between two normalized float vectors with numerical sanitation."""
+    if not vec_a or not vec_b:
+        return 0.0
+
+    dim = max(len(vec_a), len(vec_b))
+    a_clean = sanitize_vector(vec_a, dim)
+    b_clean = sanitize_vector(vec_b, dim)
+
+    dot = sum(a * b for a, b in zip(a_clean, b_clean))
+    norm_a = math.sqrt(sum(a * a for a in a_clean))
+    norm_b = math.sqrt(sum(b * b for b in b_clean))
+
     if norm_a < 1e-12 or norm_b < 1e-12:
         return 0.0
-    
+
     sim = dot / (norm_a * norm_b)
     return max(-1.0, min(1.0, float(sim)))

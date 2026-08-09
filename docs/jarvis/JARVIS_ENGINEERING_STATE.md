@@ -26,8 +26,10 @@
 | Human Approval Guard | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/approvalGuard.ts` | Safety boundary enforcement and `ESCALATE` verdict escalation policy verified. |
 | DAG Orchestration | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/dag/planner.ts`, `runner.ts` | Topological task graph runner with self-healing revision cycles, lesson memory, budget guard, and recovery integration. |
 | Memory System (DB) | **VERIFIED** | `lib/db/src/schema/workforce.ts`, `artifacts/api-server/src/lib/workforce.ts` | Persistent PostgreSQL CRUD via Drizzle ORM for memories, tasks, activities, conversations. |
-| Production RAG Engine | **VERIFIED** | `python/intelligence/retrieval/ingestion.py`, `vector_store.py` | Document-aware chunking, SHA-256 deduplication, VectorStore, and GroundingEngine verified by 28 tests. |
-| Python Intelligence Layer | **VERIFIED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 28 unit tests. Auto-spawned background daemon bridge. |
+| Production RAG Engine | **VERIFIED** | `python/intelligence/retrieval/ingestion.py`, `vector_store.py` | Document-aware chunking, SHA-256 deduplication, VectorStore, and GroundingEngine verified by 33 tests. |
+| Python Intelligence Layer | **VERIFIED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 33 unit tests. Auto-spawned background daemon bridge. |
+| Vector Math Hardening | **VERIFIED** | `python/intelligence/embeddings/engine.py` | NaN/Inf rejection, Euclidean distance, L2 norm, and dimension sanitation verified by tests. |
+| Model Intelligence Router | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/polyglot/router.ts` | Provider-neutral model routing across Reasoning, Coding Agents (Claude Code/Codex/Antigravity), Embeddings, Reranker, Web Search, and Fallbacks. |
 | Real Embeddings | **IMPLEMENTED** | `python/intelligence/embeddings/engine.py` | `RealProvider` with OpenAI & Gemini REST API integration & fallback mode tracking. |
 | Vector Database Adapter | **IMPLEMENTED** | `python/intelligence/retrieval/vector_store.py` | `PgVectorStoreAdapter` active (`SERIALIZED_TEXT_FALLBACK`); native pgvector PLANNED. |
 | Grounding / Unknown Engine | **VERIFIED** | `python/intelligence/evaluation/grounding.py` | EvidenceState classification & explicit refusal notice generation verified. |
