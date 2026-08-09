@@ -45,6 +45,7 @@ export * from "./memory/cognitiveState";
 
 export * from "./eval/cognitiveChallenge";
 export * from "./memory/patternTracker";
+export * from "./pythonBridge/client";
 
 export interface JarvisExecutionResult {
   intent: IntentAnalysis;

@@ -1,7 +1,8 @@
-import { exec } from "child_process";
+import { exec, spawn } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+let serverSpawnAttempted = false;
 
 export interface PythonIntelligenceRequest {
   requestId?: string;
@@ -31,6 +32,24 @@ export class PythonIntelligenceClient {
   constructor(serviceUrl = "http://127.0.0.1:5050/api/v1/intelligence", timeoutMs = 2500) {
     this.serviceUrl = serviceUrl;
     this.timeoutMs = timeoutMs;
+  }
+
+  /**
+   * Non-blocking check/spawn of Python Intelligence HTTP server daemon
+   */
+  public ensureServerRunning(): void {
+    if (serverSpawnAttempted) return;
+    serverSpawnAttempted = true;
+    try {
+      const child = spawn("python3", ["-m", "python.intelligence.app.server", "--port", "5050"], {
+        detached: true,
+        stdio: "ignore",
+        env: { ...process.env, PYTHONPATH: "." },
+      });
+      child.unref();
+    } catch (_err) {
+      // Background spawn error ignored; fallback to CLI / TS execution
+    }
   }
 
   /**

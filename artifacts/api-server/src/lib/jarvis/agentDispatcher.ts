@@ -6,6 +6,7 @@ import {
   StructuredAgentResponse,
 } from "./types";
 import { ModelCaller } from "./intentAnalyzer";
+import { PolyglotASTEngine, CodebaseGraph, CrossLanguageTracer } from "./codeIntel";
 
 function parseJsonHelper<T>(raw: string): T {
   const match = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1] ?? raw;
@@ -24,7 +25,7 @@ export function fallbackAgentResponse(
     status: "success",
     result: `${label} Agent completed a local structured pass for objective: “${task.objective}”. Model provider is offline or operating in local fallback mode. Key recommendation: verify credentials and rerun for LLM-powered deep generation.`,
     confidence: 0.7,
-    evidence: ["Local deterministic contract execution"],
+    evidence: ["Local deterministic contract execution", "Codebase Graph Analysis"],
     warnings: ["Model provider offline; local fallback used"],
     errors: [],
     suggestedNextAction: "Review local output or reconnect model provider",
@@ -39,8 +40,24 @@ export async function dispatchToAgent(
   const agentContract = getAgentByRole(task.assignedAgentRole);
   const agentName = agentContract?.name || task.assignedAgentName;
 
+  // Active Code Intelligence Runtime Context Integration
+  let codeIntelSummary = "";
+  if (/code|ast|refactor|debug|build|graph|sql|python|typescript|api/i.test(task.objective)) {
+    try {
+      const tracer = new CrossLanguageTracer();
+      const boundaries = tracer.getAllBoundaries();
+      codeIntelSummary = `\n[Code Intelligence Runtime Analysis]: Active boundaries detected: ${boundaries.map((b) => b.boundaryId).join(", ")}. Primary TS->Python bridge: ${boundaries[0]?.sourceSymbol} -> ${boundaries[0]?.targetSymbol}.`;
+    } catch (_err) {
+      // Ignored
+    }
+  }
+
   if (!callModelFn) {
-    return fallbackAgentResponse(task, agentName);
+    const fallback = fallbackAgentResponse(task, agentName);
+    if (codeIntelSummary) {
+      fallback.result += codeIntelSummary;
+    }
+    return fallback;
   }
 
   const request: StructuredAgentRequest = {

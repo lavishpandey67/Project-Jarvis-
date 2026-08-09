@@ -620,6 +620,41 @@ export class CognitiveMemoryStore {
   }
 
   /**
+   * Synchronize database memory records deterministically to prevent duplicate accumulation or unbounded memory growth
+   */
+  public async syncDbMemories(
+    dbRows: Array<{ id: number; title: string; content: string; kind?: string; importance: number }>,
+    conversationId: number,
+  ): Promise<number> {
+    const activeDbIds = new Set(dbRows.map((r) => `mem_db_${r.id}`));
+
+    for (const [id, rec] of Array.from(this.memories.entries())) {
+      if (id.startsWith("mem_db_") && (rec.conversationId === conversationId || !rec.conversationId)) {
+        if (!activeDbIds.has(id)) {
+          this.memories.delete(id);
+        }
+      }
+    }
+
+    for (const m of dbRows) {
+      const memId = `mem_db_${m.id}`;
+      await this.addMemory({
+        id: memId,
+        memoryType: (m.kind || "DECISION").toUpperCase() as any,
+        title: m.title,
+        content: m.content,
+        importance: m.importance,
+        conversationId,
+        source: "USER",
+        validity: "FACT",
+        confidence: 0.9,
+      });
+    }
+
+    return activeDbIds.size;
+  }
+
+  /**
    * Clear all memories (for test resetting)
    */
   public clearAll(): void {

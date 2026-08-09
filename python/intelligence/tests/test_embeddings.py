@@ -20,6 +20,26 @@ class TestEmbeddings(unittest.TestCase):
         sim = cosine_similarity(vec, vec)
         self.assertAlmostEqual(sim, 1.0, places=4)
 
+    def test_cosine_similarity_orthogonal(self):
+        v1 = [1.0, 0.0, 0.0]
+        v2 = [0.0, 1.0, 0.0]
+        self.assertAlmostEqual(cosine_similarity(v1, v2), 0.0, places=4)
+
+    def test_cosine_similarity_opposite(self):
+        v1 = [1.0, 0.0, 0.0]
+        v2 = [-1.0, 0.0, 0.0]
+        self.assertAlmostEqual(cosine_similarity(v1, v2), -1.0, places=4)
+
+    def test_cosine_similarity_zero_vector(self):
+        v1 = [0.0, 0.0, 0.0]
+        v2 = [1.0, 2.0, 3.0]
+        self.assertEqual(cosine_similarity(v1, v2), 0.0)
+
+    def test_vector_normalization(self):
+        vec = self.provider.embed_text("System vector normalization check")
+        sum_sq = sum(x * x for x in vec)
+        self.assertAlmostEqual(sum_sq, 1.0, places=4)
+
     def test_batch_embedding(self):
         batch = ["Lead scoring engine", "CRM webhook endpoint", "PostgreSQL schema"]
         vecs = self.provider.embed_batch(batch)

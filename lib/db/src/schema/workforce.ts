@@ -41,6 +41,7 @@ export const memoriesTable = pgTable("workforce_memories", {
   content: text("content").notNull(),
   kind: text("kind").notNull().default("decision"),
   importance: integer("importance").notNull().default(3),
+  embedding: text("embedding"),
   ...timestamps,
 });
 
@@ -63,6 +64,7 @@ export const cognitiveMemoriesTable = pgTable("workforce_cognitive_memories", {
   relatedTaskIds: text("related_task_ids"),
   relatedDecisionIds: text("related_decision_ids"),
   metadata: text("metadata"),
+  embedding: text("embedding"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   lastAccessedAt: timestamp("last_accessed_at", { withTimezone: true }),

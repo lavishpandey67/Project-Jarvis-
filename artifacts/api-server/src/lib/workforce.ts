@@ -25,7 +25,12 @@ import {
   UpdateTaskBody,
 } from "@workspace/api-zod";
 
-import { processWithJarvisBrain } from "./jarvis";
+import {
+  CognitiveMemoryStore,
+  ContextRetrievalEngine,
+  PythonIntelligenceClient,
+  processWithJarvisBrain,
+} from "./jarvis";
 
 const agentSeeds = [
   {
@@ -377,6 +382,28 @@ export async function respondWithCompanion(body: unknown) {
     db.select().from(tasksTable).where(eq(tasksTable.conversationId, parsed.conversationId)),
   ]);
 
+  // Ensure background Python Intelligence server is available
+  const pythonClient = new PythonIntelligenceClient();
+  pythonClient.ensureServerRunning();
+
+  // Sync database memories deterministically to Cognitive Memory Store (removes deleted records & bounds memory count)
+  const memoryStore = CognitiveMemoryStore.getInstance();
+  await memoryStore.syncDbMemories(memoryRows, parsed.conversationId);
+
+  // Retrieve Scoped Context Package via Python RAG & Composite Reranking Engine
+  const contextEngine = new ContextRetrievalEngine(memoryStore, undefined, pythonClient);
+  const scopedPackage = await contextEngine.retrieveScopedContextPackage({
+    objective: parsed.message,
+    conversationId: parsed.conversationId,
+    recentMessages: recentMessages.map((m: any) => ({ role: m.role, content: m.content })),
+    activeTasks: activeTasks.map((t: any) => ({ id: t.id, title: t.title, status: t.status })),
+  });
+
+  await recordActivity(
+    "rag_retrieval",
+    `Jarvis RAG engine retrieved ${scopedPackage.retrievalMetadata.itemsSelected} relevant memories (latency: ${scopedPackage.retrievalMetadata.retrievalLatencyMs}ms).`,
+  );
+
   const [userMessage] = await db
     .insert(messagesTable)
     .values({
@@ -393,7 +420,7 @@ export async function respondWithCompanion(body: unknown) {
   const rawWorkspaceData = {
     conversationId: parsed.conversationId,
     recentMessages: recentMessages.reverse().map((m: any) => ({ role: m.role, content: m.content })),
-    memories: memoryRows.map((m: any) => ({ title: m.title, content: m.content, importance: m.importance })),
+    memories: scopedPackage.relevantMemories,
     tasks: activeTasks.map((t: any) => ({ id: t.id, title: t.title, status: t.status })),
   };
 
