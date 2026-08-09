@@ -45,6 +45,8 @@ Project-Jarvis-/
 |---|---|---|---|
 | Core Jarvis Brain | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/` | `POST /api/companion/respond` |
 | Agent Workforce (5 Specialists) | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/registry.ts` | `dispatchToAgent()` |
+| Model Provider Contract | **VERIFIED** | `python/intelligence/providers/model_provider_contract.py` | Structured execution metadata & cost calculation |
+| Deep Cognitive State | **VERIFIED** | `python/intelligence/cognitive/deep_cognition.py` | Identity, active goals, beliefs & uncertainty tracking |
 | Autonomous Build-Repair Loop | **VERIFIED** | `python/intelligence/devops/build_repair_engine.py` | Self-healing build repair, diagnostics & LESSON memory |
 | DevOps Deployment Engine | **VERIFIED** | `python/intelligence/devops/build_repair_engine.py` | Docker deployment manifest & production health checks |
 | Connected Intelligence Loop | **VERIFIED** | `python/intelligence/pipeline/orchestrator.py` | Web $\rightarrow$ RAG $\rightarrow$ Grounding $\rightarrow$ Model Router $\rightarrow$ Agent $\rightarrow$ Patch $\rightarrow$ Rollback |
