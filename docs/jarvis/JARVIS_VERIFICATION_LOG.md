@@ -2,7 +2,9 @@
 
 **System:** JARVIS Personal AI Workforce
 **Last Updated:** 2026-08-09
-**Batch:** Batch 5.1 — RAG & Python Service Hardening & Verification
+**Batch:** Batch 5.1 — RAG & Python Service Hardening & Portability Snapshot
+**Snapshot Commit:** `a5b8d4ed98c6894acca40906a692462930d47d62`
+**Remote Backup Branch:** `backup/antigravity-2026-08-09` (`https://github.com/lavishpandey67/Project-Jarvis-.git`)
 
 ---
 
