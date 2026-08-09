@@ -4,6 +4,8 @@ import { ModelCaller } from "../intentAnalyzer";
 import { CognitiveMemoryStore } from "../memory/store";
 import { adaptGeneralistRole } from "../registry";
 import { globalRecoveryController } from "../recoveryController";
+import { globalBudgetController } from "../budgetController";
+import { globalApprovalGuard } from "../approvalGuard";
 import { JarvisTaskNode, ScopedContext } from "../types";
 import {
   DAGExecutionResult,
@@ -143,6 +145,33 @@ export async function executeTaskGraph(
     };
 
     try {
+      // 1. Budget Controller Guard Check
+      const budgetCheck = globalBudgetController.checkBudget(graph.graphId, { taskNodesCount: 1 });
+      if (!budgetCheck.allowed) {
+        node.error = budgetCheck.breachedLimit || "Execution budget exhausted";
+        transitionTaskStatus(node, "FAILED");
+        return;
+      }
+
+      // 2. Human Approval Guard Check
+      const approvalVerdict = globalApprovalGuard.evaluateOperation({
+        taskId: node.taskId,
+        agentId: node.assignedAgentName,
+        agentRole: node.assignedAgentRole,
+        operationName: `Task execution: ${node.description}`,
+        permissionClass: (node.risk === "critical" || node.risk === "high") ? "DESTRUCTIVE" : "READ",
+        riskLevel: (node.risk || "low").toUpperCase() as any,
+        targetResource: node.taskId,
+        description: node.description,
+        userApprovalGranted: false,
+      });
+
+      if (!approvalVerdict.approved && approvalVerdict.status === "ESCALATE") {
+        node.error = approvalVerdict.reason;
+        transitionTaskStatus(node, "FAILED");
+        return;
+      }
+
       let currentObjective = node.description;
       let executionSuccess = false;
 

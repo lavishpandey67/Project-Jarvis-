@@ -42,13 +42,17 @@
 - **Verified Path:** `respondWithCompanion` $\rightarrow$ DB memory sync $\rightarrow$ `ContextRetrievalEngine` $\rightarrow$ `PythonIntelligenceClient` $\rightarrow$ Python RAG Retrieval & Reranker $\rightarrow$ `ScopedContextPackage` $\rightarrow$ `processWithJarvisBrain`.
 - **Logged Activity:** `rag_retrieval` activity log recorded on every request with latency and item count.
 
-### 6. Bounded Recovery Controller & Snapshot Rollback Engine
-- **Implementation:** `RecoveryController` in `artifacts/api-server/src/lib/jarvis/recoveryController.ts` and automated failure recovery in `dag/runner.ts`.
+### 7. Budget Controller & Resource Guard
+- **Implementation:** `BudgetController` in `artifacts/api-server/src/lib/jarvis/budgetController.ts` and DAG runner integration.
 - **Verified Behavior:**
-  - Classifies runtime failures into `SYNTAX_ERROR`, `TEST_FAILURE`, `BUILD_FAILURE`, `PERMISSION_DENIED`, `TIMEOUT`, and `UNKNOWN`.
-  - Captures SHA-256 pre-modification file snapshots for rollback safety.
-  - Automatically rollbacks modifications to changed files if max retries are exhausted.
-  - Records detailed `RecoveryAttemptTrace` audit records for post-mortem analysis.
+  - Enforces task count budget (default 10 nodes), character context budget (32,000 chars), time budget (60,000 ms), task retries (2 max), and cost budget ($0.50 max).
+  - Returns `EXHAUSTED` status and prevents execution when budget limits are breached.
+
+### 8. Human Approval Guard & Escalation Policy
+- **Implementation:** `HumanApprovalGuard` in `artifacts/api-server/src/lib/jarvis/approvalGuard.ts` and DAG runner integration.
+- **Verified Behavior:**
+  - Enforces `DESTRUCTIVE` permission class boundaries and high-risk safety policies.
+  - Automatically returns `ESCALATE` verdict and halts execution when unapproved destructive operations are requested.
 
 ---
 
@@ -62,10 +66,12 @@
 | DAG Orchestration | **VERIFIED** | Topological task graph runner passing unit tests |
 | Memory System (DB) | **VERIFIED** | Drizzle ORM PostgreSQL persistence |
 | RAG / Context Engine | **INTEGRATED** | `ContextRetrievalEngine` wired into `respondWithCompanion` |
-| Python Intelligence Layer | **INTEGRATED** | RPC & CLI bridge active with 18 passing unit tests |
+| Python Intelligence Layer | **INTEGRATED** | RPC & CLI bridge active with 22 passing unit tests |
 | Real Embeddings | **IMPLEMENTED** | `RealProvider` active with OpenAI & Gemini REST API support & fallback |
 | Vector Database | **IMPLEMENTED** | Database `embedding` text column added; pgvector PLANNED |
 | Multi-Factor Reranking | **VERIFIED** | Python composite reranker active & unit tested |
 | Security & Permission Gate | **VERIFIED** | Contract permissions & CriticGate active |
 | Self-Healing Feedback Loop | **VERIFIED** | Automatic `LESSON` memory generation on task revision |
 | Bounded Recovery Controller | **VERIFIED** | `RecoveryController` failure classification & file rollback engine |
+| Budget Controller Guard | **VERIFIED** | `BudgetController` token, time, task, and cost budget limits |
+| Human Approval Guard | **VERIFIED** | `HumanApprovalGuard` DESTRUCTIVE class & escalation policy |

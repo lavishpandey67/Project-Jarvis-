@@ -45,7 +45,10 @@ Project-Jarvis-/
 |---|---|---|---|
 | Core Jarvis Brain | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/` | `POST /api/companion/respond` |
 | Agent Workforce (5 Specialists) | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/registry.ts` | `dispatchToAgent()` |
-| Adaptive Agents (7 Profiles) | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/registry.ts` | `adaptGeneralistRole()` |
+| Security & Permission Gate | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/tools/registry.ts` | Tool permission rank enforcement & audit trace |
+| Bounded Recovery Controller | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/recoveryController.ts` | Failure classification & file snapshot rollback |
+| Budget Controller Guard | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/budgetController.ts` | Task, token, time, and cost budget enforcement |
+| Human Approval Guard | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/approvalGuard.ts` | High-risk & DESTRUCTIVE action escalation policy |
 | DAG Orchestration | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/dag/` | `executeTaskGraph()` |
 | Memory System (DB + MemoryStore) | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/memory/store.ts` | `syncDbMemories()` |
 | Self-Healing Feedback Loop | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/dag/runner.ts` | Auto `LESSON` memory creation |
