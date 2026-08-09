@@ -42,11 +42,13 @@
 - **Verified Path:** `respondWithCompanion` $\rightarrow$ DB memory sync $\rightarrow$ `ContextRetrievalEngine` $\rightarrow$ `PythonIntelligenceClient` $\rightarrow$ Python RAG Retrieval & Reranker $\rightarrow$ `ScopedContextPackage` $\rightarrow$ `processWithJarvisBrain`.
 - **Logged Activity:** `rag_retrieval` activity log recorded on every request with latency and item count.
 
-### 5. Adaptive Workforce & Self-Healing Loop
-- **Implementation:** `adaptGeneralistRole()` in `registry.ts` and automated `LESSON` memory creation in `dag/runner.ts`.
+### 6. Bounded Recovery Controller & Snapshot Rollback Engine
+- **Implementation:** `RecoveryController` in `artifacts/api-server/src/lib/jarvis/recoveryController.ts` and automated failure recovery in `dag/runner.ts`.
 - **Verified Behavior:**
-  - Adaptive generalist agents (`agent_generalist_a` / `agent_generalist_b`) dynamically assume operational profiles (`debugger`, `security_engineer`, `performance_engineer`, `devops_engineer`, `test_engineer`, `recovery_engineer`, `code_reviewer`).
-  - Self-healing revision feedback loop in `runner.ts` automatically records `LESSON` memory records when tasks fail evaluation or require revision.
+  - Classifies runtime failures into `SYNTAX_ERROR`, `TEST_FAILURE`, `BUILD_FAILURE`, `PERMISSION_DENIED`, `TIMEOUT`, and `UNKNOWN`.
+  - Captures SHA-256 pre-modification file snapshots for rollback safety.
+  - Automatically rollbacks modifications to changed files if max retries are exhausted.
+  - Records detailed `RecoveryAttemptTrace` audit records for post-mortem analysis.
 
 ---
 
@@ -60,9 +62,10 @@
 | DAG Orchestration | **VERIFIED** | Topological task graph runner passing unit tests |
 | Memory System (DB) | **VERIFIED** | Drizzle ORM PostgreSQL persistence |
 | RAG / Context Engine | **INTEGRATED** | `ContextRetrievalEngine` wired into `respondWithCompanion` |
-| Python Intelligence Layer | **INTEGRATED** | RPC & CLI bridge active with 16 passing unit tests |
+| Python Intelligence Layer | **INTEGRATED** | RPC & CLI bridge active with 18 passing unit tests |
 | Real Embeddings | **IMPLEMENTED** | `RealProvider` active with OpenAI & Gemini REST API support & fallback |
 | Vector Database | **IMPLEMENTED** | Database `embedding` text column added; pgvector PLANNED |
 | Multi-Factor Reranking | **VERIFIED** | Python composite reranker active & unit tested |
 | Security & Permission Gate | **VERIFIED** | Contract permissions & CriticGate active |
 | Self-Healing Feedback Loop | **VERIFIED** | Automatic `LESSON` memory generation on task revision |
+| Bounded Recovery Controller | **VERIFIED** | `RecoveryController` failure classification & file rollback engine |

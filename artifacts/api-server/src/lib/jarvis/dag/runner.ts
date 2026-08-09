@@ -2,6 +2,8 @@ import { dispatchToAgent } from "../agentDispatcher";
 import { evaluateTaskResult } from "../eval/evaluator";
 import { ModelCaller } from "../intentAnalyzer";
 import { CognitiveMemoryStore } from "../memory/store";
+import { adaptGeneralistRole } from "../registry";
+import { globalRecoveryController } from "../recoveryController";
 import { JarvisTaskNode, ScopedContext } from "../types";
 import {
   DAGExecutionResult,
@@ -226,7 +228,31 @@ Please revise and improve your output to strictly address these corrections.`;
             executionSuccess = true;
           }
         } else {
-          // FAIL or ESCALATE
+          // FAIL or ESCALATE: Trigger Adaptive Recovery Controller
+          const failureClass = globalRecoveryController.classifyFailure(evalRes.failureReasons.join("; "));
+          const adaptiveAgent = failureClass === "PERMISSION_DENIED" || failureClass === "UNKNOWN" ? "agent_generalist_b" : "agent_generalist_a";
+          const adaptiveRole = failureClass === "PERMISSION_DENIED" ? "SECURITY"
+                             : failureClass === "TIMEOUT" ? "DEVOPS"
+                             : failureClass === "SYNTAX_ERROR" || failureClass === "BUILD_FAILURE" || failureClass === "TEST_FAILURE" ? "DEBUGGER"
+                             : "RECOVERY";
+
+          // Adapt generalist agent to handle failure
+          adaptGeneralistRole(adaptiveAgent, adaptiveRole, { taskId: node.taskId });
+
+          globalRecoveryController.recordRecoveryTrace({
+            attemptId: `rec_${node.taskId}_${Date.now()}`,
+            taskId: node.taskId,
+            assignedAgentId: adaptiveAgent,
+            assignedRole: adaptiveRole,
+            failureType: failureClass,
+            hypothesis: `Failure classified as ${failureClass}. Assigned ${adaptiveAgent} in ${adaptiveRole} mode.`,
+            proposedPatchAction: `Apply targeted patch for ${evalRes.failureReasons.join("; ")}`,
+            targetFiles: [],
+            verificationResult: "FAILED",
+            rolledBack: false,
+            timestamp: new Date().toISOString(),
+          });
+
           const isMaxRev = node.revisionCount >= node.maxRevisionCycles;
           node.error = isMaxRev
             ? `Exceeded maximum revision cycles (${node.maxRevisionCycles}). Escalating task failure: ${evalRes.failureReasons.join("; ")}`
@@ -240,12 +266,29 @@ Please revise and improve your output to strictly address these corrections.`;
       const errMessage = err.message || "Execution error";
       node.error = errMessage;
 
+      const failureClass = globalRecoveryController.classifyFailure(errMessage);
+      globalRecoveryController.recordRecoveryTrace({
+        attemptId: `rec_err_${node.taskId}_${Date.now()}`,
+        taskId: node.taskId,
+        assignedAgentId: "agent_generalist_b",
+        assignedRole: "RECOVERY",
+        failureType: failureClass,
+        hypothesis: `Unhandled exception: ${errMessage}`,
+        proposedPatchAction: "Retry node execution within task retry budget",
+        targetFiles: [],
+        verificationResult: "FAILED",
+        rolledBack: false,
+        timestamp: new Date().toISOString(),
+      });
+
       if (node.retryCount < node.maxRetries) {
         node.retryCount += 1;
         // Reset to READY for retry
         transitionTaskStatus(node, isTimeout ? "TIMEOUT" : "FAILED");
         transitionTaskStatus(node, "READY");
       } else {
+        // Rollback any changed files if max retries exhausted
+        globalRecoveryController.rollbackTaskModifications(node.taskId);
         node.completedAt = new Date().toISOString();
         transitionTaskStatus(node, isTimeout ? "TIMEOUT" : "FAILED");
       }

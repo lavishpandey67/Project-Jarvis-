@@ -248,13 +248,16 @@ export interface CognitiveChallengeReport {
 export interface TaskRoleProfile {
   profileId: string;
   agentId: "agent_generalist_a" | "agent_generalist_b";
-  temporaryRoleName: string; // e.g., "technical_investigator", "data_analyst", "planner"
+  temporaryRoleName: string; // e.g., "DEBUGGER", "SECURITY", "DEVOPS", "RECOVERY", "INTEGRATOR", "VERIFIER"
   description: string;
   capabilities: AgentCapability[];
   authorizedToolIds: string[];
   permissionBoundary: ToolPermissionClass[];
   expiryTime: string; // ISO date string after which profile automatically expires
   createdAt: string;
+  taskId?: string;
+  projectId?: string;
+  allowedPaths?: string[];
 }
 
 export interface ScopedContextPackage {

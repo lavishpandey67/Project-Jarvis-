@@ -20,8 +20,9 @@
 |---|---|---|---|
 | Core Jarvis Brain | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/index.ts`, `intentAnalyzer.ts`, `planner.ts` | Executed via `POST /api/companion/respond`. Graceful local synthesis fallback when model keys absent. |
 | Agent Workforce | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/registry.ts`, `agentDispatcher.ts` | 5 specialized agent contracts stored & dispatched during DAG execution. |
-| Adaptive Agents | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/registry.ts` | `adaptGeneralistRole()` dynamically assigns 7 operational profiles (debugger, security, devops, etc.). |
-| DAG Orchestration | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/dag/planner.ts`, `runner.ts` | Topological task graph runner with self-healing revision cycles and automatic lesson memory recording. |
+| Adaptive Agents | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/registry.ts` | `adaptGeneralistRole()` dynamically assigns 7 operational profiles (DEBUGGER, SECURITY, DEVOPS, RECOVERY, INTEGRATOR, VERIFIER, INVESTIGATOR). |
+| Recovery Controller | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/recoveryController.ts` | Failure classification, pre-modification SHA-256 snapshots, and bounded rollback engine verified. |
+| DAG Orchestration | **VERIFIED** | `artifacts/api-server/src/lib/jarvis/dag/planner.ts`, `runner.ts` | Topological task graph runner with self-healing revision cycles, lesson memory recording, and recovery controller integration. |
 | Memory System (DB) | **VERIFIED** | `lib/db/src/schema/workforce.ts`, `artifacts/api-server/src/lib/workforce.ts` | Persistent PostgreSQL CRUD via Drizzle ORM for memories, tasks, activities, conversations. |
 | RAG / Context Engine | **INTEGRATED** | `artifacts/api-server/src/lib/jarvis/memory/contextEngine.ts` | `ContextRetrievalEngine` wired into `respondWithCompanion()` with deterministic memory sync. |
 | Python Intelligence Layer | **INTEGRATED** | `python/intelligence/`, `artifacts/api-server/src/lib/jarvis/pythonBridge/client.ts` | HTTP RPC & CLI Python server passing 16 unit tests. Auto-spawned background daemon bridge. |

@@ -131,6 +131,7 @@ export function assignAdaptiveTaskProfile(
   authorizedToolIds: string[],
   permissionBoundary: ToolPermissionClass[],
   durationMinutes: number = 30,
+  contextOpts?: { taskId?: string; projectId?: string; allowedPaths?: string[] },
 ): TaskRoleProfile {
   const profileId = `profile_${agentId}_${Date.now()}`;
   const now = new Date();
@@ -139,13 +140,16 @@ export function assignAdaptiveTaskProfile(
   const profile: TaskRoleProfile = {
     profileId,
     agentId,
-    temporaryRoleName,
-    description: `Temporary profile '${temporaryRoleName}' assigned to ${agentId}`,
+    temporaryRoleName: temporaryRoleName.toUpperCase(),
+    description: `Temporary adaptive profile '${temporaryRoleName.toUpperCase()}' assigned to ${agentId}`,
     capabilities,
     authorizedToolIds,
     permissionBoundary,
     expiryTime,
     createdAt: now.toISOString(),
+    taskId: contextOpts?.taskId,
+    projectId: contextOpts?.projectId,
+    allowedPaths: contextOpts?.allowedPaths || ["/root/Project-Jarvis-"],
   };
 
   activeRoleProfiles.set(agentId, profile);
@@ -174,60 +178,87 @@ export function clearAdaptiveTaskProfile(agentId: string): void {
   activeRoleProfiles.delete(agentId);
 }
 
+export type AdaptiveRoleName =
+  | "DEBUGGER"
+  | "SECURITY"
+  | "DEVOPS"
+  | "RECOVERY"
+  | "INTEGRATOR"
+  | "VERIFIER"
+  | "INVESTIGATOR"
+  | "debugger"
+  | "security_engineer"
+  | "performance_engineer"
+  | "devops_engineer"
+  | "test_engineer"
+  | "recovery_engineer"
+  | "code_reviewer";
+
 /**
- * Helper to adapt generalists dynamically into specialized operational profiles:
- * 'debugger' | 'security_engineer' | 'performance_engineer' | 'devops_engineer' | 'test_engineer' | 'recovery_engineer' | 'code_reviewer'
+ * Helper to adapt generalists dynamically into specialized operational profiles
  */
 export function adaptGeneralistRole(
   agentId: "agent_generalist_a" | "agent_generalist_b",
-  targetRole: "debugger" | "security_engineer" | "performance_engineer" | "devops_engineer" | "test_engineer" | "recovery_engineer" | "code_reviewer",
+  targetRole: AdaptiveRoleName,
+  contextOpts?: { taskId?: string; projectId?: string; allowedPaths?: string[] },
 ): TaskRoleProfile {
+  const normalizedRole = targetRole.toUpperCase();
   const profileMap: Record<string, { capabilities: AgentCapability[]; tools: string[]; permissions: ToolPermissionClass[] }> = {
-    debugger: {
+    DEBUGGER: {
       capabilities: ["debugging", "refactoring", "code_generation", "evaluation"],
       tools: ["tool_file_read", "tool_file_write", "tool_memory_search"],
       permissions: ["READ", "WRITE"],
     },
-    security_engineer: {
+    SECURITY: {
       capabilities: ["risk_analysis", "adversarial_review", "validation", "evaluation"],
       tools: ["tool_file_read", "tool_memory_search"],
       permissions: ["READ"],
     },
-    performance_engineer: {
-      capabilities: ["refactoring", "implementation", "decision_analysis"],
-      tools: ["tool_file_read", "tool_file_write"],
-      permissions: ["READ", "WRITE"],
-    },
-    devops_engineer: {
+    DEVOPS: {
       capabilities: ["approved_tool_execution", "workspace_operations"],
       tools: ["tool_file_read", "tool_file_write", "tool_create_task"],
       permissions: ["READ", "WRITE", "EXECUTE"],
     },
-    test_engineer: {
-      capabilities: ["testing", "validation", "evaluation"],
-      tools: ["tool_file_read", "tool_file_write", "tool_create_note"],
-      permissions: ["READ", "WRITE"],
-    },
-    recovery_engineer: {
+    RECOVERY: {
       capabilities: ["debugging", "refactoring", "workspace_operations", "evaluation"],
       tools: ["tool_file_read", "tool_file_write", "tool_memory_search"],
       permissions: ["READ", "WRITE", "EXECUTE"],
     },
-    code_reviewer: {
-      capabilities: ["contradiction_detection", "adversarial_review", "evaluation"],
-      tools: ["tool_file_read", "tool_memory_search"],
+    INTEGRATOR: {
+      capabilities: ["implementation", "refactoring", "workspace_operations"],
+      tools: ["tool_file_read", "tool_file_write"],
+      permissions: ["READ", "WRITE"],
+    },
+    VERIFIER: {
+      capabilities: ["testing", "validation", "evaluation"],
+      tools: ["tool_file_read", "tool_file_write", "tool_create_note"],
+      permissions: ["READ", "WRITE"],
+    },
+    INVESTIGATOR: {
+      capabilities: ["research", "evidence_extraction", "document_analysis"],
+      tools: ["tool_file_read", "tool_memory_search", "tool_web_search"],
       permissions: ["READ"],
     },
   };
 
-  const config = profileMap[targetRole] || profileMap.debugger;
+  // Map older string names to normalized roles
+  const key = normalizedRole.includes("SECURITY") ? "SECURITY"
+            : normalizedRole.includes("DEVOPS") ? "DEVOPS"
+            : normalizedRole.includes("RECOVERY") ? "RECOVERY"
+            : normalizedRole.includes("INTEGRAT") ? "INTEGRATOR"
+            : normalizedRole.includes("VERIF") ? "VERIFIER"
+            : normalizedRole.includes("INVESTIGAT") ? "INVESTIGATOR"
+            : "DEBUGGER";
+
+  const config = profileMap[key] || profileMap.DEBUGGER;
   return assignAdaptiveTaskProfile(
     agentId,
-    targetRole,
+    key,
     config.capabilities,
     config.tools,
     config.permissions,
     60,
+    contextOpts,
   );
 }
 
