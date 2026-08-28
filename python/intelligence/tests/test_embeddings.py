@@ -47,11 +47,17 @@ class TestEmbeddings(unittest.TestCase):
         self.assertEqual(len(vecs[0]), 384)
 
     def test_real_provider_fallback(self):
-        real_p = RealProvider(vector_dim=384)
-        info = real_p.get_provider_info()
-        self.assertEqual(info["mode"], "DEVELOPMENT_FALLBACK")
-        vec = real_p.embed_text("Test fallback behavior")
-        self.assertEqual(len(vec), 384)
+        import os
+        old_key = os.environ.pop("GEMINI_API_KEY", None)
+        try:
+            real_p = RealProvider(vector_dim=384)
+            info = real_p.get_provider_info()
+            self.assertEqual(info["mode"], "DEVELOPMENT_FALLBACK")
+            vec = real_p.embed_text("Test fallback behavior")
+            self.assertEqual(len(vec), 384)
+        finally:
+            if old_key is not None:
+                os.environ["GEMINI_API_KEY"] = old_key
 
 if __name__ == "__main__":
     unittest.main()

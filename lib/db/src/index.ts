@@ -41,9 +41,11 @@ if (process.env.DATABASE_URL) {
       content TEXT NOT NULL,
       kind TEXT NOT NULL DEFAULT 'decision',
       importance INT NOT NULL DEFAULT 3,
+      embedding TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE workforce_memories ADD COLUMN IF NOT EXISTS embedding TEXT;
     CREATE TABLE IF NOT EXISTS workforce_agents (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL UNIQUE,
@@ -88,11 +90,13 @@ if (process.env.DATABASE_URL) {
       related_task_ids TEXT,
       related_decision_ids TEXT,
       metadata TEXT,
+      embedding TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       last_accessed_at TIMESTAMPTZ,
       last_reinforced_at TIMESTAMPTZ
     );
+    ALTER TABLE workforce_cognitive_memories ADD COLUMN IF NOT EXISTS embedding TEXT;
     CREATE TABLE IF NOT EXISTS workforce_memory_conflicts (
       id TEXT PRIMARY KEY,
       existing_memory_id TEXT NOT NULL,

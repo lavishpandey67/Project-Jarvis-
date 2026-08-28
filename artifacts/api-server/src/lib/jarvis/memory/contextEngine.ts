@@ -38,11 +38,28 @@ export class ContextRetrievalEngine {
   private pythonClient: PythonIntelligenceClient;
   private defaultBudget: ContextBudget;
 
-  constructor(options: ContextEngineOptions) {
-    this.store = options.store;
-    this.scorer = options.scorer || new RelevanceScorer();
-    this.pythonClient = options.pythonClient || new PythonIntelligenceClient();
-    this.defaultBudget = options.defaultBudget || DEFAULT_CONTEXT_BUDGET;
+  constructor(
+    optionsOrStore: ContextEngineOptions | CognitiveMemoryStore,
+    scorer?: RelevanceScorer,
+    pythonClient?: PythonIntelligenceClient,
+    defaultBudget?: ContextBudget,
+  ) {
+    if (optionsOrStore instanceof CognitiveMemoryStore || (optionsOrStore && "queryMemories" in optionsOrStore)) {
+      this.store = optionsOrStore as CognitiveMemoryStore;
+      this.scorer = scorer || new RelevanceScorer();
+      this.pythonClient = pythonClient || new PythonIntelligenceClient();
+      this.defaultBudget = defaultBudget || DEFAULT_CONTEXT_BUDGET;
+    } else {
+      const opts = optionsOrStore as ContextEngineOptions;
+      this.store = opts.store;
+      this.scorer = opts.scorer || new RelevanceScorer();
+      this.pythonClient = opts.pythonClient || new PythonIntelligenceClient();
+      this.defaultBudget = opts.defaultBudget || DEFAULT_CONTEXT_BUDGET;
+    }
+  }
+
+  public retrieveScopedContextPackage(params: Parameters<typeof this.buildScopedContextPackage>[0]): Promise<ScopedContextPackage> {
+    return this.buildScopedContextPackage(params);
   }
 
   /**

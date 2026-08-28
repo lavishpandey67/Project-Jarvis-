@@ -54,7 +54,10 @@ class TestCodeIntelligenceAndPatchSuite(unittest.TestCase):
         self.assertIn("execute", py_names)
 
     def test_codebase_graph_building_and_cross_language_boundaries(self):
-        res = self.graph.build_graph_from_repository(self.ast_engine, "/root/Project-Jarvis-/python/intelligence/")
+        repo_path = os.path.join(os.getcwd(), "python/intelligence")
+        if not os.path.exists(repo_path):
+            repo_path = "python/intelligence"
+        res = self.graph.build_graph_from_repository(self.ast_engine, repo_path)
         self.assertGreater(res["totalNodes"], 0)
         self.assertGreaterEqual(res["totalCrossLanguageBoundaries"], 0)
 

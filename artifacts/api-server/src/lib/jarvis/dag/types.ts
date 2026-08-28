@@ -33,6 +33,7 @@ export interface TaskGraphNode {
   latestEvaluation?: EvaluationResult;
   timeoutMs: number;
   confidence?: number;
+  risk?: string;
   result?: string;
   error?: string;
   startedAt?: string;

@@ -24,6 +24,15 @@ import {
 import { eq } from "drizzle-orm";
 
 export class CognitiveMemoryStore {
+  private static instance: CognitiveMemoryStore;
+
+  public static getInstance(): CognitiveMemoryStore {
+    if (!CognitiveMemoryStore.instance) {
+      CognitiveMemoryStore.instance = new CognitiveMemoryStore();
+    }
+    return CognitiveMemoryStore.instance;
+  }
+
   private memories: Map<string, CognitiveMemoryRecord> = new Map();
   private conflicts: Map<string, MemoryConflictRecord> = new Map();
   private userPatterns: Map<string, UserCognitivePattern> = new Map();
