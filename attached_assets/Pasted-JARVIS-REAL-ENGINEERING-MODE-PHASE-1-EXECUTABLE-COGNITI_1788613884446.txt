@@ -1,0 +1,290 @@
+JARVIS — REAL ENGINEERING MODE
+PHASE 1: EXECUTABLE COGNITIVE/DEVELOPMENT RUNTIME
+
+You are working directly on the existing Project-Jarvis GitHub repository.
+
+IMPORTANT:
+
+This is NOT a prototype-generation task.
+This is NOT a UI task.
+This is NOT an audit.
+This is NOT a documentation exercise.
+This is NOT a tracer-bullet exercise.
+Do NOT create temporary fixtures to claim capability.
+Do NOT manufacture simulated success.
+Do NOT add infrastructure merely because it sounds modern.
+
+We are now converting the existing JARVIS codebase into a real,
+executable, evidence-driven system.
+
+FIRST PRINCIPLE:
+
+The LLM is probabilistic.
+It may propose incorrect plans, diagnoses, code, or conclusions.
+
+Therefore model output MUST NOT itself constitute evidence of success.
+
+The runtime must establish truth through actual execution,
+observation, evaluation, and state transitions.
+
+==================================================
+TARGET
+==================================================
+
+Build the first production-oriented execution substrate for JARVIS.
+
+The immediate objective is to create a REAL executable workflow/state
+graph mechanism that can drive an engineering task through:
+
+GOAL
+→ CONTEXT
+→ PLAN
+→ AUTHORIZE
+→ EXECUTE
+→ OBSERVE
+→ EVALUATE
+→ RECOVER if necessary
+→ RE-EXECUTE
+→ VERIFY
+→ LEARN
+→ COMPLETE
+
+This must be executable runtime behavior, not a prompt loop and not
+a textual representation of a loop.
+
+==================================================
+EXISTING SYSTEM
+==================================================
+
+Preserve and reuse the existing Project-Jarvis architecture wherever
+it is technically sound.
+
+Known existing areas include:
+
+- TypeScript API/runtime
+- Python intelligence
+- planner/DAG components
+- workforce
+- memory
+- tools
+- file read
+- file write
+- file patch
+- test execution
+- policy
+- observation/telemetry
+- recovery/rollback
+- database/PGlite fallback
+- Gemini provider integration
+
+Some existing components may be incomplete, simulated, duplicated,
+or architecturally weak.
+
+Do NOT assume that existing code is correct simply because it exists
+or because tests pass.
+
+Do NOT rewrite the repository wholesale.
+
+==================================================
+PHASE 1A — EXECUTION GRAPH
+==================================================
+
+Implement a genuine runtime representation of execution state.
+
+The system must have explicit concepts for:
+
+- execution/task identity
+- goal
+- current state
+- graph/node identity
+- transition
+- node input
+- node output
+- execution result
+- observation
+- failure
+- retry/recovery
+- termination
+- evidence
+- timestamps
+- correlation/execution IDs
+
+The graph must support conditional transitions based on REAL
+execution state and REAL observations.
+
+The model may propose what should happen.
+
+The deterministic runtime must decide whether a transition is
+actually allowed.
+
+Do not allow free-form model text to silently control execution.
+
+==================================================
+PHASE 1B — REAL EXECUTION
+==================================================
+
+Connect the graph to the EXISTING real tools.
+
+The graph must be capable of invoking actual repository operations,
+including where appropriate:
+
+- file inspection
+- file modification
+- patching
+- test execution
+- build execution
+- runtime/process verification
+
+Every action must produce structured execution evidence.
+
+For example:
+
+- command executed
+- exit code
+- stdout/stderr where appropriate
+- files changed
+- before/after hashes where available
+- execution duration
+- tool identity
+- state transition
+- failure information
+
+Never fabricate these values.
+
+==================================================
+PHASE 1C — FAILURE + RECOVERY
+==================================================
+
+A failed operation must create an explicit failure state.
+
+The system must distinguish at least:
+
+SUCCESS
+FAILURE
+RECOVERABLE_FAILURE
+UNRECOVERABLE_FAILURE
+CANCELLED
+ESCALATED
+
+Implement bounded recovery.
+
+Do NOT create an infinite self-correction loop.
+
+A recovery attempt must be based on actual observations from the
+failed execution.
+
+If recovery fails beyond the configured boundary:
+
+→ stop
+→ preserve evidence
+→ report failure honestly
+
+Never convert failure into success merely because the model says
+the task should now work.
+
+==================================================
+PHASE 1D — VERIFICATION
+==================================================
+
+Define objective completion criteria.
+
+Completion must require evidence satisfying those criteria.
+
+Example:
+
+"Build succeeded" is not equivalent to:
+
+"the model predicted that the build should succeed."
+
+Use actual process/test/runtime evidence.
+
+The evaluator must receive:
+
+- original objective
+- expected success criteria
+- execution history
+- observations
+- final state
+
+and return a structured evaluation.
+
+==================================================
+PHASE 1E — DURABLE STATE
+==================================================
+
+Determine which execution state must survive process restart.
+
+Do not keep critical workflow state solely in memory.
+
+Use the existing database architecture where appropriate.
+
+The implementation must consider:
+
+- restart
+- duplicate execution
+- interrupted execution
+- retry
+- idempotency
+- transactional state changes
+
+Do not introduce a new database merely because it is fashionable.
+
+==================================================
+PHASE 1F — REAL SEMANTIC MEMORY
+==================================================
+
+After establishing the execution-state boundary, inspect the existing
+memory/RAG implementation.
+
+Identify every place where a hash/fingerprint is being treated as
+semantic embedding.
+
+A cryptographic/hash representation is NOT a semantic embedding.
+
+Replace or activate the appropriate path using a REAL embedding
+provider and the existing persistent storage architecture where
+practical.
+
+The semantic-memory pipeline should ultimately be:
+
+INGEST
+→ CHUNK
+→ METADATA
+→ REAL EMBEDDING
+→ PERSIST
+→ RETRIEVE
+→ RERANK
+→ CONTEXT PACKAGE
+→ EVIDENCE/PROVENANCE
+
+Do not claim semantic retrieval is complete merely because a vector
+was generated.
+
+Retrieval must be measurable against real stored content.
+
+Do not destroy the existing Python intelligence implementation.
+Integrate with it where it is already the correct boundary.
+
+==================================================
+IMPLEMENTATION RULES
+==================================================
+
+1. Work against the REAL Project-Jarvis repository.
+
+2. Do not use temporary demo projects to demonstrate completion.
+
+3. Do not create fake model responses.
+
+4. Do not create fake embeddings.
+
+5. Do not create fake execution receipts.
+
+6. Do not add another standalone tracer bullet.
+
+7. Do not spend the task generating documentation instead of code.
+
+8. Do not redesign the whole architecture.
+
+9. Do not introduce unnecessary frameworks.
+
+10. Preserve working implementations.
