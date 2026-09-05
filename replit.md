@@ -4,12 +4,16 @@ A mobile-first personal AI workspace where a Companion orchestrates specialized 
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server in a shell; set `PORT` as needed (the Replit workflow uses 8080)
+- Replit workflow `API Server` runs the API on port 8080.
+- Replit workflow `Personal AI Workforce` runs the Vite frontend on port 22527.
+- The `Project` workflow starts both services together.
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Optional env: `OPENAI_API_KEY` — enables provider-backed Companion responses; without it, the app uses its explicit local fallback mode.
 
 ## Stack
 
