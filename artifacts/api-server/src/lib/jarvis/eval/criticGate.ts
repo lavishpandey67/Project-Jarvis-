@@ -32,14 +32,17 @@ export function runCriticGate(
 
   const lower = agentOutput.toLowerCase();
 
-  // Check for explicit error flags or incomplete stubs
+  // Check for explicit error flags or incomplete stubs (avoid false-positive on test reports)
   if (lower.includes("[error]") || lower.includes("failed to generate") || lower.includes("todo: implement")) {
-    failureReasons.push("Output contains explicit error or placeholder markers.");
-    suggestedCorrections.push("Replace placeholder or error markers with actual verified content.");
+    // Only fail if this is an unhandled generation failure rather than a test execution observation report
+    if (!lower.includes("tool_run_test") && !lower.includes("test execution observation") && !lower.includes("test failed (exit code")) {
+      failureReasons.push("Output contains explicit generation error or placeholder markers.");
+      suggestedCorrections.push("Replace placeholder or error markers with actual verified content.");
+    }
   }
 
   // Check constraint compliance
-  for (const constraint of node.constraints) {
+  for (const constraint of node.constraints || []) {
     const cLower = constraint.toLowerCase();
     if (cLower.includes("type safety") || cLower.includes("strict type")) {
       const hasProperTypes = /\b(interface|type)\s+[A-Z]\w*/i.test(agentOutput) || /:\s*(string|number|boolean|any|void|[A-Z]\w*)/.test(agentOutput);

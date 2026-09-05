@@ -12,9 +12,16 @@ export type FailureClassification =
 
 export interface FileSnapshot {
   filePath: string;
-  originalContent: string;
-  hash: string;
+  originalContent: string | null;
+  hash: string | null;
+  fileExisted: boolean;
   timestamp: string;
+}
+
+export interface RollbackResult {
+  success: boolean;
+  restoredFiles: string[];
+  unlinkedFiles: string[];
 }
 
 export interface RecoveryAttemptTrace {
@@ -68,14 +75,20 @@ export class RecoveryController {
 
   /**
    * Capture pre-modification file snapshots for rollback safety
+   * Preserves earliest snapshot for each file across multiple operations in the same task
    */
   public createPreModificationSnapshot(taskId: string, filePaths: string[]): FileSnapshot[] {
-    const taskSnapshots: FileSnapshot[] = [];
+    const taskSnapshots: FileSnapshot[] = this.snapshots.get(taskId) || [];
     const timestamp = new Date().toISOString();
 
     for (const filePath of filePaths) {
       try {
         const absolutePath = path.resolve(filePath);
+        // If file already snapshotted for this task, preserve initial pre-task baseline
+        if (taskSnapshots.some((s) => s.filePath === absolutePath)) {
+          continue;
+        }
+
         if (fs.existsSync(absolutePath)) {
           const content = fs.readFileSync(absolutePath, "utf-8");
           const hash = crypto.createHash("sha256").update(content).digest("hex");
@@ -83,6 +96,16 @@ export class RecoveryController {
             filePath: absolutePath,
             originalContent: content,
             hash,
+            fileExisted: true,
+            timestamp,
+          });
+        } else {
+          // File does not exist yet; record that it was created during this task
+          taskSnapshots.push({
+            filePath: absolutePath,
+            originalContent: null,
+            hash: null,
+            fileExisted: false,
             timestamp,
           });
         }
@@ -96,23 +119,52 @@ export class RecoveryController {
   }
 
   /**
-   * Perform bounded rollback of files changed during failed recovery attempt
+   * Get all file paths that have been snapshotted for a task
    */
-  public rollbackTaskModifications(taskId: string): { success: boolean; restoredFiles: string[] } {
+  public getSnapshottedFiles(taskId: string): string[] {
+    const snapshots = this.snapshots.get(taskId) || [];
+    return snapshots.map((s) => s.filePath);
+  }
+
+  /**
+   * Clear snapshots for a task after verified successful completion
+   */
+  public clearSnapshots(taskId: string): void {
+    this.snapshots.delete(taskId);
+  }
+
+  /**
+   * Perform bounded transactional rollback of files changed during failed recovery attempt
+   */
+  public rollbackTaskModifications(taskId: string): RollbackResult {
     const snapshots = this.snapshots.get(taskId) || [];
     const restoredFiles: string[] = [];
+    const unlinkedFiles: string[] = [];
 
     for (const snap of snapshots) {
       try {
-        fs.writeFileSync(snap.filePath, snap.originalContent, "utf-8");
-        restoredFiles.push(snap.filePath);
+        if (snap.fileExisted && snap.originalContent !== null) {
+          // Restore prior file content
+          fs.writeFileSync(snap.filePath, snap.originalContent, "utf-8");
+          restoredFiles.push(snap.filePath);
+        } else if (!snap.fileExisted) {
+          // Remove newly created file that did not exist before task
+          if (fs.existsSync(snap.filePath)) {
+            fs.unlinkSync(snap.filePath);
+            unlinkedFiles.push(snap.filePath);
+          }
+        }
       } catch (_err) {
         // Log rollback error
       }
     }
 
     this.snapshots.delete(taskId);
-    return { success: restoredFiles.length > 0, restoredFiles };
+    return {
+      success: restoredFiles.length > 0 || unlinkedFiles.length > 0,
+      restoredFiles,
+      unlinkedFiles,
+    };
   }
 
   /**

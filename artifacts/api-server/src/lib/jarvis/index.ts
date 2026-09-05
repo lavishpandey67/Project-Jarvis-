@@ -43,6 +43,7 @@ export * from "./memory/store";
 export * from "./memory/contextEngine";
 export * from "./memory/cognitiveState";
 
+export * from "./recoveryController";
 export * from "./eval/cognitiveChallenge";
 export * from "./memory/patternTracker";
 export * from "./pythonBridge/client";

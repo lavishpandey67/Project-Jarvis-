@@ -65,6 +65,7 @@ export interface TaskExecutionTrace {
   evaluationResult?: EvaluationResult;
   latencyMs?: number;
   confidence?: number;
+  targetFiles?: string[];
   error?: string;
 }
 

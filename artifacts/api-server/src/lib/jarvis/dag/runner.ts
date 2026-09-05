@@ -1,12 +1,13 @@
 import { dispatchToAgent } from "../agentDispatcher";
 import { evaluateTaskResult } from "../eval/evaluator";
+import { EvaluationResult, EvaluationVerdict } from "../eval/types";
 import { ModelCaller } from "../intentAnalyzer";
 import { CognitiveMemoryStore } from "../memory/store";
 import { adaptGeneralistRole } from "../registry";
 import { globalRecoveryController } from "../recoveryController";
 import { globalBudgetController } from "../budgetController";
 import { globalApprovalGuard } from "../approvalGuard";
-import { JarvisTaskNode, ScopedContext } from "../types";
+import { JarvisTaskNode, ScopedContext, StructuredAgentResponse } from "../types";
 import {
   DAGExecutionResult,
   TaskExecutionTrace,
@@ -48,6 +49,16 @@ export function transitionTaskStatus(
 export interface DAGRunnerOptions {
   maxConcurrency?: number;
   callModelFn?: ModelCaller;
+  customDispatcher?: (
+    task: JarvisTaskNode,
+    context: ScopedContext,
+    callModelFn?: ModelCaller,
+  ) => Promise<Partial<StructuredAgentResponse>>;
+  customEvaluator?: (
+    node: TaskGraphNode,
+    result: string,
+    context: ScopedContext,
+  ) => Partial<EvaluationResult> & { verdict: EvaluationVerdict };
 }
 
 export async function executeTaskGraph(
@@ -181,33 +192,74 @@ export async function executeTaskGraph(
           taskId: node.taskId,
           objective: currentObjective,
           description: currentObjective,
-          requiredCapabilities: node.requiredCapabilities,
+          requiredCapabilities: node.requiredCapabilities || [],
           assignedAgentRole: node.assignedAgentRole,
           assignedAgentName: node.assignedAgentName,
           expectedOutput: node.expectedOutputs || "",
-          constraints: node.constraints,
+          constraints: node.constraints || [],
           risk: "low",
           status: "running",
         };
 
+        let timeoutTimer: NodeJS.Timeout | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(
+          timeoutTimer = setTimeout(
             () => reject(new Error(`Task timed out after ${node.timeoutMs}ms`)),
             node.timeoutMs,
           );
+          if (timeoutTimer.unref) {
+            timeoutTimer.unref();
+          }
         });
 
-        const response = await Promise.race([
-          dispatchToAgent(taskAdapter, context, callModelFn),
-          timeoutPromise,
-        ]);
+        const dispatcher = options.customDispatcher ?? dispatchToAgent;
+        let rawResponse: Partial<StructuredAgentResponse>;
+        try {
+          rawResponse = await Promise.race([
+            dispatcher(taskAdapter, context, callModelFn),
+            timeoutPromise,
+          ]);
+        } finally {
+          if (timeoutTimer) {
+            clearTimeout(timeoutTimer);
+          }
+        }
+
+        const response: StructuredAgentResponse = {
+          taskId: taskAdapter.taskId,
+          agentRole: taskAdapter.assignedAgentRole,
+          agentName: taskAdapter.assignedAgentName,
+          status: "success",
+          result: rawResponse.result || "",
+          confidence: rawResponse.confidence ?? 1,
+          warnings: rawResponse.warnings || [],
+          errors: rawResponse.errors || [],
+          evidence: rawResponse.evidence || [],
+          ...rawResponse,
+        };
 
         node.completedAt = new Date().toISOString();
         node.result = response.result;
         node.confidence = response.confidence;
 
         // Perform Evaluation & Critic Gate
-        const evalRes = evaluateTaskResult(node, response.result, context);
+        const evaluator = options.customEvaluator ?? evaluateTaskResult;
+        const rawEval = evaluator(node, response.result, context);
+        const evalRes: EvaluationResult = {
+          taskId: node.taskId,
+          evaluator: rawEval.evaluator || "critic",
+          schemaScore: rawEval.schemaScore ?? 1,
+          goalScore: rawEval.goalScore ?? (rawEval.verdict === "PASS" ? 1 : 0),
+          constraintScore: rawEval.constraintScore ?? 1,
+          groundingScore: rawEval.groundingScore ?? 1,
+          criticScore: rawEval.criticScore ?? 1,
+          confidenceScore: rawEval.confidenceScore ?? 1,
+          overallScore: rawEval.overallScore ?? (rawEval.verdict === "PASS" ? 1 : 0.1),
+          verdict: rawEval.verdict,
+          failureReasons: rawEval.failureReasons || [],
+          requiredCorrections: rawEval.requiredCorrections || [],
+          evaluatedAt: rawEval.evaluatedAt || new Date().toISOString(),
+        };
         node.latestEvaluation = evalRes;
         node.evaluationHistory.push(evalRes);
 
@@ -217,9 +269,11 @@ export async function executeTaskGraph(
         trace.evaluationResult = evalRes;
 
         if (evalRes.verdict === "PASS") {
+          globalRecoveryController.clearSnapshots(node.taskId);
           transitionTaskStatus(node, "SUCCESS");
           executionSuccess = true;
         } else if (evalRes.verdict === "PARTIAL") {
+          globalRecoveryController.clearSnapshots(node.taskId);
           transitionTaskStatus(node, "PARTIAL");
           executionSuccess = true;
         } else if (evalRes.verdict === "REVISE") {
@@ -249,15 +303,18 @@ Evaluation Failure Reasons: ${evalRes.failureReasons.join("; ")}
 Required Corrections: ${evalRes.requiredCorrections.join("; ")}
 Please revise and improve your output to strictly address these corrections.`;
           } else {
-            // Exceeded max revision cycles -> ESCALATE / FAIL
+            // Exceeded max revision cycles -> ESCALATE / FAIL with transactional rollback
             evalRes.verdict = "ESCALATE";
             trace.verdict = "ESCALATE";
             node.error = `Exceeded maximum revision cycles (${node.maxRevisionCycles}). Escalating task failure: ${evalRes.failureReasons.join("; ")}`;
+            const modifiedFiles = globalRecoveryController.getSnapshottedFiles(node.taskId);
+            const rollbackRes = globalRecoveryController.rollbackTaskModifications(node.taskId);
+            trace.targetFiles = modifiedFiles;
             transitionTaskStatus(node, "FAILED");
             executionSuccess = true;
           }
         } else {
-          // FAIL or ESCALATE: Trigger Adaptive Recovery Controller
+          // FAIL or ESCALATE: Trigger Adaptive Recovery Controller & Transactional Rollback
           const failureClass = globalRecoveryController.classifyFailure(evalRes.failureReasons.join("; "));
           const adaptiveAgent = failureClass === "PERMISSION_DENIED" || failureClass === "UNKNOWN" ? "agent_generalist_b" : "agent_generalist_a";
           const adaptiveRole = failureClass === "PERMISSION_DENIED" ? "SECURITY"
@@ -268,6 +325,9 @@ Please revise and improve your output to strictly address these corrections.`;
           // Adapt generalist agent to handle failure
           adaptGeneralistRole(adaptiveAgent, adaptiveRole, { taskId: node.taskId });
 
+          const modifiedFiles = globalRecoveryController.getSnapshottedFiles(node.taskId);
+          const rollbackRes = globalRecoveryController.rollbackTaskModifications(node.taskId);
+
           globalRecoveryController.recordRecoveryTrace({
             attemptId: `rec_${node.taskId}_${Date.now()}`,
             taskId: node.taskId,
@@ -276,9 +336,9 @@ Please revise and improve your output to strictly address these corrections.`;
             failureType: failureClass,
             hypothesis: `Failure classified as ${failureClass}. Assigned ${adaptiveAgent} in ${adaptiveRole} mode.`,
             proposedPatchAction: `Apply targeted patch for ${evalRes.failureReasons.join("; ")}`,
-            targetFiles: [],
+            targetFiles: modifiedFiles,
             verificationResult: "FAILED",
-            rolledBack: false,
+            rolledBack: rollbackRes.success,
             timestamp: new Date().toISOString(),
           });
 
@@ -296,19 +356,8 @@ Please revise and improve your output to strictly address these corrections.`;
       node.error = errMessage;
 
       const failureClass = globalRecoveryController.classifyFailure(errMessage);
-      globalRecoveryController.recordRecoveryTrace({
-        attemptId: `rec_err_${node.taskId}_${Date.now()}`,
-        taskId: node.taskId,
-        assignedAgentId: "agent_generalist_b",
-        assignedRole: "RECOVERY",
-        failureType: failureClass,
-        hypothesis: `Unhandled exception: ${errMessage}`,
-        proposedPatchAction: "Retry node execution within task retry budget",
-        targetFiles: [],
-        verificationResult: "FAILED",
-        rolledBack: false,
-        timestamp: new Date().toISOString(),
-      });
+      const modifiedFiles = globalRecoveryController.getSnapshottedFiles(node.taskId);
+      let rolledBack = false;
 
       if (node.retryCount < node.maxRetries) {
         node.retryCount += 1;
@@ -317,10 +366,25 @@ Please revise and improve your output to strictly address these corrections.`;
         transitionTaskStatus(node, "READY");
       } else {
         // Rollback any changed files if max retries exhausted
-        globalRecoveryController.rollbackTaskModifications(node.taskId);
+        const rollbackRes = globalRecoveryController.rollbackTaskModifications(node.taskId);
+        rolledBack = rollbackRes.success;
         node.completedAt = new Date().toISOString();
         transitionTaskStatus(node, isTimeout ? "TIMEOUT" : "FAILED");
       }
+
+      globalRecoveryController.recordRecoveryTrace({
+        attemptId: `rec_err_${node.taskId}_${Date.now()}`,
+        taskId: node.taskId,
+        assignedAgentId: "agent_generalist_b",
+        assignedRole: "RECOVERY",
+        failureType: failureClass,
+        hypothesis: `Unhandled exception: ${errMessage}`,
+        proposedPatchAction: "Retry node execution within task retry budget",
+        targetFiles: modifiedFiles,
+        verificationResult: "FAILED",
+        rolledBack,
+        timestamp: new Date().toISOString(),
+      });
     } finally {
       const latencyMs = Date.now() - taskStartTime;
       trace.endTime = node.completedAt || new Date().toISOString();

@@ -1,3 +1,10 @@
+import * as path from "node:path";
+import * as fs from "node:fs/promises";
+import * as crypto from "node:crypto";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
 import {
   ToolDefinition,
   ToolExecutionResult,
@@ -5,6 +12,7 @@ import {
   ToolPermissionClass,
 } from "../memory/types";
 import { CognitiveMemoryStore } from "../memory/store";
+import { globalRecoveryController } from "../recoveryController";
 
 export class InternalToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
@@ -290,19 +298,72 @@ export class InternalToolRegistry {
       sandboxed: true,
       resourceCost: 1,
       inputSchema: { filePath: "string" },
-      outputSchema: { content: "string" },
+      outputSchema: { filePath: "string", sizeBytes: "number", lineCount: "number", content: "string" },
       allowedAgentRoles: ["*"],
       reversibility: true,
       externalImpact: false,
       executionTimeoutMs: 5000,
       failurePolicy: "CONTINUE_WITH_WARNING",
       execute: async (input: { filePath: string }) => {
-        return {
-          success: true,
-          output: { filePath: input.filePath, content: "// Read file content inspect" },
-          logs: [`Read file '${input.filePath}'`],
-          executionTimeMs: 0,
-        };
+        const workspaceRoot = process.cwd();
+        const rawPath = (input.filePath || "").trim();
+
+        if (!rawPath) {
+          return {
+            success: false,
+            error: "Security Policy / Validation Error: filePath must be provided.",
+            logs: ["Empty filePath provided to tool_file_read"],
+          };
+        }
+
+        const resolvedPath = path.resolve(workspaceRoot, rawPath);
+
+        // Security Policy Check: Sandboxed strictly within workspace root
+        if (!resolvedPath.startsWith(workspaceRoot)) {
+          return {
+            success: false,
+            error: `Security Policy Violation: Access to path '${rawPath}' is outside workspace boundary.`,
+            logs: [`Security policy denied access to path outside workspace: '${rawPath}'`],
+          };
+        }
+
+        try {
+          const stat = await fs.stat(resolvedPath);
+          if (!stat.isFile()) {
+            return {
+              success: false,
+              error: `Path '${rawPath}' is not a regular file.`,
+              logs: [`Target path '${rawPath}' is not a regular file`],
+            };
+          }
+
+          if (stat.size > 128 * 1024) {
+            return {
+              success: false,
+              error: `File '${rawPath}' exceeds maximum safe read limit of 128KB (size: ${stat.size} bytes).`,
+              logs: [`File size limit exceeded for '${rawPath}'`],
+            };
+          }
+
+          const content = await fs.readFile(resolvedPath, "utf-8");
+          const lineCount = content.split("\n").length;
+          return {
+            success: true,
+            output: {
+              filePath: rawPath,
+              sizeBytes: stat.size,
+              lineCount,
+              content,
+            },
+            logs: [`Successfully read ${stat.size} bytes (${lineCount} lines) from '${rawPath}'`],
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            error: `File read failed: ${err?.message || String(err)}`,
+            logs: [`Failed to read file '${rawPath}': ${err?.message || String(err)}`],
+          };
+        }
       },
     } as any);
 
@@ -310,26 +371,510 @@ export class InternalToolRegistry {
     this.registerTool({
       id: "tool_file_write",
       name: "Workspace File Writer",
-      description: "Writes content to specified workspace file path.",
+      description: "Writes content to specified workspace file path with strict sandboxing, sha256 tracking, and readback verification.",
       permissionClass: "WRITE",
       riskLevel: "medium",
       isReversible: true,
       sandboxed: true,
       resourceCost: 2,
       inputSchema: { filePath: "string", content: "string" },
-      outputSchema: { success: "boolean" },
-      allowedAgentRoles: ["builder", "executor", "agent_generalist_b"],
+      outputSchema: {
+        filePath: "string",
+        resolvedPath: "string",
+        bytesBefore: "number",
+        bytesAfter: "number",
+        hashBefore: "string",
+        hashAfter: "string",
+        changed: "boolean",
+        verified: "boolean",
+        lineCount: "number",
+      },
+      allowedAgentRoles: ["builder", "executor", "generalist_a", "generalist_b"],
       reversibility: true,
       externalImpact: false,
       executionTimeoutMs: 10000,
       failurePolicy: "STOP_ON_FAILURE",
-      execute: async (input: { filePath: string; content: string }) => {
-        return {
-          success: true,
-          output: { filePath: input.filePath, bytesWritten: input.content.length },
-          logs: [`Wrote ${input.content.length} bytes to '${input.filePath}'`],
-          executionTimeMs: 0,
-        };
+      execute: async (
+        input: { filePath: string; content: string },
+        context?: { permissions?: ToolPermissionClass[]; agentRole?: string; taskId?: string },
+      ) => {
+        const workspaceRoot = process.cwd();
+        const rawPath = (input.filePath || "").trim();
+
+        if (!rawPath) {
+          return {
+            success: false,
+            error: "Validation Error: filePath must be provided.",
+            logs: ["Empty filePath provided to tool_file_write"],
+          };
+        }
+
+        if (input.content === undefined || input.content === null || typeof input.content !== "string") {
+          return {
+            success: false,
+            error: "Validation Error: content string must be provided.",
+            logs: ["Invalid or missing content provided to tool_file_write"],
+          };
+        }
+
+        // Content size limit check (Max 256KB safe limit)
+        const writeSizeBytes = Buffer.byteLength(input.content, "utf-8");
+        if (writeSizeBytes > 256 * 1024) {
+          return {
+            success: false,
+            error: `Security Limit Exceeded: Write payload exceeds maximum safe limit of 256KB (size: ${writeSizeBytes} bytes).`,
+            logs: [`Write payload size limit exceeded for '${rawPath}'`],
+          };
+        }
+
+        const resolvedPath = path.resolve(workspaceRoot, rawPath);
+
+        // Security Policy Check 1: Sandboxed strictly within workspace root
+        if (!resolvedPath.startsWith(workspaceRoot) || resolvedPath === workspaceRoot) {
+          return {
+            success: false,
+            error: `Security Policy Violation: Target path '${rawPath}' is outside workspace boundary.`,
+            logs: [`Security policy denied write to path outside workspace: '${rawPath}'`],
+          };
+        }
+
+        // Security Policy Check 2: Symlink escape containment check on existing ancestors
+        try {
+          let currentCheck = path.dirname(resolvedPath);
+          while (currentCheck && currentCheck !== workspaceRoot && currentCheck !== "/") {
+            try {
+              const realAncestor = await fs.realpath(currentCheck);
+              if (!realAncestor.startsWith(workspaceRoot)) {
+                return {
+                  success: false,
+                  error: `Security Policy Violation: Ancestor path '${currentCheck}' resolves outside workspace boundary.`,
+                  logs: [`Symlink boundary violation detected at '${currentCheck}'`],
+                };
+              }
+              break;
+            } catch {
+              currentCheck = path.dirname(currentCheck);
+            }
+          }
+        } catch {
+          // Ignored
+        }
+
+        // Capture Pre-mutation State (Before metrics)
+        let bytesBefore = 0;
+        let hashBefore: string | null = null;
+        let fileExistedBefore = false;
+
+        try {
+          const preStat = await fs.stat(resolvedPath);
+          if (preStat.isDirectory()) {
+            return {
+              success: false,
+              error: `Filesystem Error: Target path '${rawPath}' is a directory and cannot be overwritten as a file.`,
+              logs: [`Target path '${rawPath}' is a directory`],
+            };
+          }
+          if (preStat.isFile()) {
+            fileExistedBefore = true;
+            const existingContent = await fs.readFile(resolvedPath, "utf-8");
+            bytesBefore = Buffer.byteLength(existingContent, "utf-8");
+            hashBefore = crypto.createHash("sha256").update(existingContent).digest("hex");
+          }
+        } catch {
+          // File does not exist yet (normal for creation)
+          fileExistedBefore = false;
+          bytesBefore = 0;
+          hashBefore = null;
+        }
+
+        // Capture pre-modification snapshot for transactional rollback if taskId is provided
+        if (context?.taskId) {
+          globalRecoveryController.createPreModificationSnapshot(context.taskId, [resolvedPath]);
+        }
+
+        // Execute Filesystem Mutation
+        try {
+          await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+          await fs.writeFile(resolvedPath, input.content, "utf-8");
+        } catch (err: any) {
+          return {
+            success: false,
+            error: `Filesystem Write Failed: ${err?.message || String(err)}`,
+            logs: [`Failed to write to file '${rawPath}': ${err?.message || String(err)}`],
+          };
+        }
+
+        // Post-mutation Verification (Deterministic read-back & comparison)
+        try {
+          const statAfter = await fs.stat(resolvedPath);
+          if (!statAfter.isFile()) {
+            return {
+              success: false,
+              error: `Post-write Verification Failed: '${rawPath}' is not a regular file on disk after write.`,
+              logs: [`Verification failed for '${rawPath}'`],
+            };
+          }
+
+          const diskContent = await fs.readFile(resolvedPath, "utf-8");
+          if (diskContent !== input.content) {
+            return {
+              success: false,
+              error: "Post-write Verification Failed: File content on disk does not match written content.",
+              logs: [`Verification mismatch on '${rawPath}'`],
+            };
+          }
+
+          const bytesAfter = statAfter.size;
+          const hashAfter = crypto.createHash("sha256").update(diskContent).digest("hex");
+          const lineCount = diskContent.split("\n").length;
+          const changed = hashBefore !== hashAfter;
+
+          return {
+            success: true,
+            output: {
+              filePath: rawPath,
+              resolvedPath,
+              bytesBefore,
+              bytesAfter,
+              hashBefore,
+              hashAfter,
+              changed,
+              verified: true,
+              lineCount,
+              sizeBytes: bytesAfter,
+              fileExistedBefore,
+            },
+            logs: [
+              `Successfully wrote and verified ${bytesAfter} bytes (${lineCount} lines) to '${rawPath}'. SHA256: ${hashAfter}`,
+            ],
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            error: `Post-write Verification Error: ${err?.message || String(err)}`,
+            logs: [`Failed verifying write to '${rawPath}': ${err?.message || String(err)}`],
+          };
+        }
+      },
+    } as any);
+
+    // 5b. Workspace Surgical File Patcher Tool
+    this.registerTool({
+      id: "tool_file_patch",
+      name: "Workspace Surgical File Patcher",
+      description: "Performs safe, verified in-place surgical patching on a target file using unique targetContent and replacementContent with SHA-256 validation.",
+      permissionClass: "WRITE",
+      riskLevel: "medium",
+      isReversible: true,
+      sandboxed: true,
+      resourceCost: 2,
+      inputSchema: { filePath: "string", targetContent: "string", replacementContent: "string" },
+      outputSchema: {
+        filePath: "string",
+        resolvedPath: "string",
+        bytesBefore: "number",
+        bytesAfter: "number",
+        hashBefore: "string",
+        hashAfter: "string",
+        changed: "boolean",
+        verified: "boolean",
+        lineCount: "number",
+        patchOccurrences: "number",
+      },
+      allowedAgentRoles: ["builder", "executor", "generalist_a", "generalist_b"],
+      reversibility: true,
+      externalImpact: false,
+      executionTimeoutMs: 10000,
+      failurePolicy: "CONTINUE_WITH_WARNING",
+      execute: async (
+        input: { filePath: string; targetContent: string; replacementContent: string },
+        context?: { permissions?: ToolPermissionClass[]; agentRole?: string; taskId?: string },
+      ) => {
+        const workspaceRoot = process.cwd();
+        const rawPath = (input.filePath || "").trim();
+        const targetContent = input.targetContent;
+        const replacementContent = input.replacementContent ?? "";
+
+        if (!rawPath) {
+          return {
+            success: false,
+            error: "Validation Error: filePath must be provided.",
+            logs: ["Empty filePath provided to tool_file_patch"],
+          };
+        }
+
+        if (typeof targetContent !== "string" || targetContent.length === 0) {
+          return {
+            success: false,
+            error: "Validation Error: targetContent must be a non-empty string.",
+            logs: ["Empty or invalid targetContent provided to tool_file_patch"],
+          };
+        }
+
+        if (typeof replacementContent !== "string") {
+          return {
+            success: false,
+            error: "Validation Error: replacementContent must be a string.",
+            logs: ["Invalid replacementContent type provided to tool_file_patch"],
+          };
+        }
+
+        // Security Check 1: Traversal Prevention
+        if (rawPath.includes("..") || rawPath.startsWith("/") || rawPath.startsWith("\\")) {
+          const resolvedAttempt = path.resolve(workspaceRoot, rawPath);
+          if (!resolvedAttempt.startsWith(workspaceRoot) || resolvedAttempt === workspaceRoot) {
+            return {
+              success: false,
+              error: "Security Policy Violation: Target path is outside workspace boundary.",
+              logs: [`Security policy denied patch operation for path: '${rawPath}'`],
+            };
+          }
+        }
+
+        const resolvedPath = path.resolve(workspaceRoot, rawPath);
+        if (!resolvedPath.startsWith(workspaceRoot) || resolvedPath === workspaceRoot) {
+          return {
+            success: false,
+            error: "Security Policy Violation: Target path is outside workspace boundary.",
+            logs: [`Security policy denied patch operation for path: '${rawPath}'`],
+          };
+        }
+
+        // Check target file existence
+        try {
+          const stat = await fs.stat(resolvedPath);
+          if (!stat.isFile()) {
+            return {
+              success: false,
+              error: `Patch Failed: Target path '${rawPath}' is not a regular file.`,
+              logs: [`Attempted to patch non-file: '${rawPath}'`],
+            };
+          }
+        } catch {
+          return {
+            success: false,
+            error: `Patch Failed: Target file '${rawPath}' does not exist.`,
+            logs: [`File does not exist for patch: '${rawPath}'`],
+          };
+        }
+
+        // Read current content & hash
+        const currentContent = await fs.readFile(resolvedPath, "utf-8");
+        const bytesBefore = Buffer.byteLength(currentContent, "utf-8");
+        const hashBefore = crypto.createHash("sha256").update(currentContent).digest("hex");
+
+        // Validate uniqueness of targetContent in file
+        const occurrences = currentContent.split(targetContent).length - 1;
+        if (occurrences === 0) {
+          return {
+            success: false,
+            error: `Patch Failed: targetContent not found in '${rawPath}'. Please verify the exact text to replace.`,
+            logs: [`targetContent not found in '${rawPath}'`],
+          };
+        }
+
+        if (occurrences > 1) {
+          return {
+            success: false,
+            error: `Patch Failed: targetContent occurs ${occurrences} times in '${rawPath}'. targetContent must be unique. Provide more surrounding context lines.`,
+            logs: [`targetContent matched ${occurrences} times in '${rawPath}'`],
+          };
+        }
+
+        // Capture pre-modification snapshot for transactional rollback if taskId is provided
+        if (context?.taskId) {
+          globalRecoveryController.createPreModificationSnapshot(context.taskId, [resolvedPath]);
+        }
+
+        // Apply replacement
+        const patchedContent = currentContent.replace(targetContent, replacementContent);
+        await fs.writeFile(resolvedPath, patchedContent, "utf-8");
+
+        // Post-patch verification
+        try {
+          const statAfter = await fs.stat(resolvedPath);
+          const diskContent = await fs.readFile(resolvedPath, "utf-8");
+
+          if (diskContent !== patchedContent) {
+            return {
+              success: false,
+              error: "Post-patch Verification Failed: Disk content mismatch after patch write.",
+              logs: [`Verification mismatch on '${rawPath}'`],
+            };
+          }
+
+          const bytesAfter = statAfter.size;
+          const hashAfter = crypto.createHash("sha256").update(diskContent).digest("hex");
+          const lineCount = diskContent.split("\n").length;
+          const changed = hashBefore !== hashAfter;
+
+          return {
+            success: true,
+            output: {
+              filePath: rawPath,
+              resolvedPath,
+              bytesBefore,
+              bytesAfter,
+              hashBefore,
+              hashAfter,
+              changed,
+              verified: true,
+              lineCount,
+              patchOccurrences: occurrences,
+            },
+            logs: [
+              `Successfully patched and verified '${rawPath}'. Size: ${bytesBefore}B -> ${bytesAfter}B. SHA256: ${hashAfter}`,
+            ],
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            error: `Post-patch Verification Error: ${err?.message || String(err)}`,
+            logs: [`Failed verifying patch to '${rawPath}': ${err?.message || String(err)}`],
+          };
+        }
+      },
+    } as any);
+
+    // 5c. Sandboxed Test Runner Tool (Controlled Test/Build verification capability)
+    this.registerTool({
+      id: "tool_run_test",
+      name: "Workspace Sandboxed Test Runner",
+      description: "Executes permitted deterministic test/build scripts strictly inside workspace directory with timeout and exit code capture.",
+      permissionClass: "EXECUTE",
+      riskLevel: "medium",
+      isReversible: true,
+      sandboxed: true,
+      resourceCost: 3,
+      inputSchema: { testCommand: "string", targetPath: "string" },
+      outputSchema: {
+        testCommand: "string",
+        targetPath: "string",
+        exitCode: "number",
+        passed: "boolean",
+        stdout: "string",
+        stderr: "string",
+        durationMs: "number",
+        testFailureReason: "string",
+      },
+      allowedAgentRoles: ["builder", "executor", "critic", "generalist_a", "generalist_b"],
+      reversibility: true,
+      externalImpact: false,
+      executionTimeoutMs: 15000,
+      failurePolicy: "CONTINUE_WITH_WARNING",
+      execute: async (input: { testCommand: string; targetPath?: string }) => {
+        const workspaceRoot = process.cwd();
+        const rawCmd = (input.testCommand || "").trim();
+        const rawTargetPath = (input.targetPath || "").trim();
+
+        if (!rawCmd) {
+          return {
+            success: false,
+            error: "Validation Error: testCommand must be provided.",
+            logs: ["Empty testCommand provided to tool_run_test"],
+          };
+        }
+
+        // Security Policy Check 1: Allowed test command prefixes whitelist
+        // Prohibit arbitrary destructive shell commands (rm -rf, curl, wget, netcat, sudo, etc.)
+        const allowedPatterns = [
+          /^node\s+[\w\-\.\/]+$/i,
+          /^npx\s+(?:pnpm|tsc|tsx|vitest|jest|mocha)\b/i,
+          /^python3?\s+[\w\-\.\/]+$/i,
+        ];
+
+        const isCommandAllowed = allowedPatterns.some((pattern) => pattern.test(rawCmd));
+        if (!isCommandAllowed) {
+          return {
+            success: false,
+            error: `Security Policy Violation: Command '${rawCmd}' is not in the permitted sandboxed test runner whitelist. Permitted prefixes: node, npx, python3.`,
+            logs: [`Security policy denied unapproved test command: '${rawCmd}'`],
+          };
+        }
+
+        // Security Policy Check 2: Prohibit shell injection characters (pipe, subshell, redirects outside sandbox)
+        if (/[;&|`$><]/.test(rawCmd)) {
+          return {
+            success: false,
+            error: `Security Policy Violation: Shell operators and chaining characters (; & | \` $ > <) are prohibited.`,
+            logs: [`Security policy denied command with chaining/redirection operators: '${rawCmd}'`],
+          };
+        }
+
+        // Security Policy Check 3: Workspace containment check on targetPath if provided
+        if (rawTargetPath) {
+          const resolvedTargetPath = path.resolve(workspaceRoot, rawTargetPath);
+          if (!resolvedTargetPath.startsWith(workspaceRoot) || resolvedTargetPath === workspaceRoot) {
+            return {
+              success: false,
+              error: `Security Policy Violation: Target test path '${rawTargetPath}' is outside workspace boundary.`,
+              logs: [`Security policy denied test execution for path outside workspace: '${rawTargetPath}'`],
+            };
+          }
+        }
+
+        const start = Date.now();
+        try {
+          const { stdout, stderr } = await execAsync(rawCmd, {
+            cwd: workspaceRoot,
+            timeout: 10000,
+            maxBuffer: 512 * 1024,
+            env: {
+              ...process.env,
+              NODE_ENV: "test",
+              CI: "true",
+            },
+          });
+
+          const durationMs = Date.now() - start;
+          return {
+            success: true,
+            output: {
+              testCommand: rawCmd,
+              targetPath: rawTargetPath || "workspace",
+              exitCode: 0,
+              passed: true,
+              stdout: stdout ? stdout.trim() : "",
+              stderr: stderr ? stderr.trim() : "",
+              durationMs,
+            },
+            logs: [`Test command '${rawCmd}' executed successfully (Exit Code: 0, Duration: ${durationMs}ms)`],
+          };
+        } catch (err: any) {
+          const durationMs = Date.now() - start;
+          const exitCode = typeof err.code === "number" ? err.code : 1;
+          const stdout = err.stdout ? String(err.stdout).trim() : "";
+          const stderr = err.stderr ? String(err.stderr).trim() : (err.message || "");
+          const combinedOutput = `${stdout}\n${stderr}`.trim();
+
+          // Classify failure reason from actual test output
+          let testFailureReason = "Test execution failed with non-zero exit code.";
+          if (combinedOutput.includes("AssertionError") || combinedOutput.includes("assert")) {
+            testFailureReason = `Assertion failure: ${combinedOutput.slice(0, 300)}`;
+          } else if (combinedOutput.includes("SyntaxError") || combinedOutput.includes("TypeError")) {
+            testFailureReason = `Runtime/Syntax error: ${combinedOutput.slice(0, 300)}`;
+          } else if (err.killed || err.signal === "SIGTERM") {
+            testFailureReason = "Test execution timed out after 10000ms.";
+          }
+
+          return {
+            success: false,
+            error: `Test Failed (Exit Code ${exitCode}): ${testFailureReason}`,
+            output: {
+              testCommand: rawCmd,
+              targetPath: rawTargetPath || "workspace",
+              exitCode,
+              passed: false,
+              stdout,
+              stderr,
+              durationMs,
+              testFailureReason,
+            },
+            logs: [
+              `Test command '${rawCmd}' failed with exit code ${exitCode}: ${testFailureReason}`,
+            ],
+          };
+        }
       },
     } as any);
 
