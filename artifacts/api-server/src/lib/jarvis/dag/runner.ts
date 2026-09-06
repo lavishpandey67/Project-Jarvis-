@@ -3,10 +3,12 @@ import { evaluateTaskResult } from "../eval/evaluator";
 import { EvaluationResult, EvaluationVerdict } from "../eval/types";
 import { ModelCaller } from "../intentAnalyzer";
 import { CognitiveMemoryStore } from "../memory/store";
-import { adaptGeneralistRole } from "../registry";
+import { adaptGeneralistRole, getAgentByRole } from "../registry";
 import { globalRecoveryController } from "../recoveryController";
 import { globalBudgetController } from "../budgetController";
 import { globalApprovalGuard } from "../approvalGuard";
+import { globalToolRegistry } from "../tools/registry";
+import { ToolPermissionClass } from "../memory/types";
 import { JarvisTaskNode, ScopedContext, StructuredAgentResponse } from "../types";
 import {
   DAGExecutionResult,
@@ -14,13 +16,16 @@ import {
   TaskGraph,
   TaskGraphNode,
   TaskStatus,
+  KernelLifecycleStage,
+  StructuredObservation,
+  NodeTransitionRecord,
 } from "./types";
 import { validateTaskGraph } from "./validator";
 
 export const LEGAL_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   PENDING: ["READY", "BLOCKED", "CANCELLED"],
   READY: ["RUNNING", "CANCELLED"],
-  RUNNING: ["SUCCESS", "FAILED", "PARTIAL", "TIMEOUT", "CANCELLED"],
+  RUNNING: ["SUCCESS", "FAILED", "PARTIAL", "TIMEOUT", "CANCELLED", "READY"],
   SUCCESS: [],
   FAILED: ["READY", "FAILED"], // READY if retrying
   PARTIAL: [],
@@ -29,21 +34,98 @@ export const LEGAL_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   TIMEOUT: ["READY", "TIMEOUT"], // READY if retrying
 };
 
+export const LEGAL_STAGE_TRANSITIONS: Record<KernelLifecycleStage, KernelLifecycleStage[]> = {
+  OBJECTIVE: ["UNDERSTAND", "PLAN", "FAILED"],
+  UNDERSTAND: ["PLAN", "FAILED"],
+  PLAN: ["AUTHORIZE", "FAILED"],
+  AUTHORIZE: ["EXECUTE", "FAILED"],
+  EXECUTE: ["OBSERVE", "FAILED"],
+  OBSERVE: ["EVALUATE", "FAILED"],
+  EVALUATE: ["COMPLETE", "RECOVER", "FAILED"],
+  RECOVER: ["EXECUTE", "PLAN", "COMPLETE", "FAILED"],
+  COMPLETE: [],
+  FAILED: [],
+};
+
 export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
   if (from === to) return true;
   return LEGAL_TRANSITIONS[from]?.includes(to) ?? false;
 }
 
-export function transitionTaskStatus(
+export function canTransitionStage(from?: KernelLifecycleStage, to?: KernelLifecycleStage): boolean {
+  if (!from || !to || from === to) return true;
+  return (LEGAL_STAGE_TRANSITIONS[from] as any)?.includes(to) ?? true;
+}
+
+export function transitionNode(
   node: TaskGraphNode,
   targetStatus: TaskStatus,
+  targetStage: KernelLifecycleStage,
+  reason?: string,
 ): void {
   if (!canTransition(node.status, targetStatus)) {
     throw new Error(
       `Illegal status transition for task '${node.taskId}': '${node.status}' -> '${targetStatus}'`,
     );
   }
+  const fromStatus = node.status;
+  const fromStage = node.stage;
   node.status = targetStatus;
+  node.stage = targetStage;
+  node.transitionHistory = node.transitionHistory || [];
+  node.transitionHistory.push({
+    fromStatus,
+    toStatus: targetStatus,
+    fromStage,
+    toStage: targetStage,
+    timestamp: new Date().toISOString(),
+    reason,
+  });
+}
+
+export function transitionTaskStatus(
+  node: TaskGraphNode,
+  targetStatus: TaskStatus,
+): void {
+  const defaultStage: KernelLifecycleStage =
+    targetStatus === "SUCCESS" || targetStatus === "PARTIAL"
+      ? "COMPLETE"
+      : targetStatus === "FAILED" || targetStatus === "TIMEOUT"
+      ? "FAILED"
+      : targetStatus === "RUNNING"
+      ? "EXECUTE"
+      : targetStatus === "READY"
+      ? "PLAN"
+      : "PLAN";
+
+  transitionNode(node, targetStatus, node.stage || defaultStage);
+}
+
+function extractTargetFilesFromNode(node: TaskGraphNode): string[] {
+  const files: string[] = [];
+  if (node.inputs?.filePath) files.push(String(node.inputs.filePath));
+  if (node.inputs?.sourceFile) files.push(String(node.inputs.sourceFile));
+  if (node.inputs?.targetPath) files.push(String(node.inputs.targetPath));
+  const text = `${node.description || ""} ${node.expectedOutputs || ""}`;
+  const match = text.match(/(?:file|path|in|to)\s+([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/i);
+  if (match && match[1] && !match[1].startsWith("http")) {
+    files.push(match[1]);
+  }
+  return Array.from(new Set(files));
+}
+
+function getPermissionsForRole(role: string): ToolPermissionClass[] {
+  const agent = getAgentByRole(role);
+  if (agent && agent.permissions) {
+    return agent.permissions as ToolPermissionClass[];
+  }
+  if (role === "builder" || role === "executor" || role === "generalist_a" || role === "generalist_b") {
+    return ["READ", "WRITE", "EXECUTE"];
+  }
+  if (role === "strategy") {
+    return ["READ", "WRITE"];
+  }
+  return ["READ"];
 }
 
 export interface DAGRunnerOptions {
@@ -58,6 +140,7 @@ export interface DAGRunnerOptions {
     node: TaskGraphNode,
     result: string,
     context: ScopedContext,
+    observations?: StructuredObservation[],
   ) => Partial<EvaluationResult> & { verdict: EvaluationVerdict };
 }
 
@@ -71,18 +154,56 @@ export async function executeTaskGraph(
   const startTime = Date.now();
   const traces: TaskExecutionTrace[] = [];
 
-  // Validate Graph before execution
+  // Stage 1: OBJECTIVE
+  graph.stage = "OBJECTIVE";
+  graph.transitionHistory = graph.transitionHistory || [];
+  graph.transitionHistory.push({
+    stage: "OBJECTIVE",
+    status: graph.status,
+    timestamp: new Date().toISOString(),
+    reason: `Objective initialized: ${graph.objective}`,
+  });
+
+  // Stage 2: UNDERSTAND
+  graph.stage = "UNDERSTAND";
+  graph.transitionHistory.push({
+    stage: "UNDERSTAND",
+    status: graph.status,
+    timestamp: new Date().toISOString(),
+    reason: "Scoped context and workforce capability requirements verified",
+  });
+
+  // Stage 3: PLAN & Validate Graph
+  graph.stage = "PLAN";
+  graph.transitionHistory.push({
+    stage: "PLAN",
+    status: graph.status,
+    timestamp: new Date().toISOString(),
+    reason: "Validating TaskGraph acyclic topology and constraints",
+  });
+
   const validation = validateTaskGraph(graph);
   if (!validation.valid) {
     graph.status = "FAILED";
+    graph.stage = "FAILED";
+    graph.transitionHistory.push({
+      stage: "FAILED",
+      status: "FAILED",
+      timestamp: new Date().toISOString(),
+      reason: `TaskGraph validation failed: ${validation.errors.join("; ")}`,
+    });
     throw new Error(
       `TaskGraph validation failed for graph '${graph.graphId}': ${validation.errors.join("; ")}`,
     );
   }
 
   graph.status = "RUNNING";
+  graph.stage = "EXECUTE";
   const nodeMap = new Map<string, TaskGraphNode>();
   for (const node of graph.nodes) {
+    node.observations = node.observations || [];
+    node.transitionHistory = node.transitionHistory || [];
+    node.stage = node.stage || "PLAN";
     nodeMap.set(node.taskId, node);
   }
 
@@ -92,7 +213,7 @@ export async function executeTaskGraph(
       if (node.status !== "PENDING") continue;
 
       if (node.dependencies.length === 0) {
-        transitionTaskStatus(node, "READY");
+        transitionNode(node, "READY", "PLAN", "No dependencies required");
         continue;
       }
 
@@ -122,10 +243,10 @@ export async function executeTaskGraph(
       }
 
       if (hasTerminalFailure) {
-        transitionTaskStatus(node, "BLOCKED");
+        transitionNode(node, "BLOCKED", "FAILED", "Blocked due to dependency failure or block");
         node.error = "Blocked due to dependency failure or block.";
       } else if (allSucceeded) {
-        transitionTaskStatus(node, "READY");
+        transitionNode(node, "READY", "PLAN", "All dependencies completed successfully");
       }
     }
   }
@@ -151,16 +272,25 @@ export async function executeTaskGraph(
       agentName: node.assignedAgentName,
       startTime: node.startedAt,
       status: "RUNNING",
+      stage: "AUTHORIZE",
       retryCount: node.retryCount,
       revisionCycle: node.revisionCount,
     };
 
     try {
+      // Stage 4: AUTHORIZE
+      transitionNode(node, "RUNNING", "AUTHORIZE", "Evaluating execution budget and permission boundaries");
+
       // 1. Budget Controller Guard Check
       const budgetCheck = globalBudgetController.checkBudget(graph.graphId, { taskNodesCount: 1 });
       if (!budgetCheck.allowed) {
         node.error = budgetCheck.breachedLimit || "Execution budget exhausted";
-        transitionTaskStatus(node, "FAILED");
+        node.authorizationVerdict = {
+          approved: false,
+          status: "REJECTED",
+          reason: node.error,
+        };
+        transitionNode(node, "FAILED", "FAILED", node.error);
         return;
       }
 
@@ -177,9 +307,15 @@ export async function executeTaskGraph(
         userApprovalGranted: false,
       });
 
+      node.authorizationVerdict = {
+        approved: approvalVerdict.approved,
+        status: approvalVerdict.status,
+        reason: approvalVerdict.reason,
+      };
+
       if (!approvalVerdict.approved && approvalVerdict.status === "ESCALATE") {
         node.error = approvalVerdict.reason;
-        transitionTaskStatus(node, "FAILED");
+        transitionNode(node, "FAILED", "FAILED", approvalVerdict.reason);
         return;
       }
 
@@ -187,49 +323,126 @@ export async function executeTaskGraph(
       let executionSuccess = false;
 
       while (!executionSuccess) {
-        // Adapt TaskGraphNode to JarvisTaskNode for dispatcher
-        const taskAdapter: JarvisTaskNode = {
-          taskId: node.taskId,
-          objective: currentObjective,
-          description: currentObjective,
-          requiredCapabilities: node.requiredCapabilities || [],
-          assignedAgentRole: node.assignedAgentRole,
-          assignedAgentName: node.assignedAgentName,
-          expectedOutput: node.expectedOutputs || "",
-          constraints: node.constraints || [],
-          risk: "low",
-          status: "running",
-        };
+        // Stage 5: EXECUTE
+        transitionNode(node, "RUNNING", "EXECUTE", `Commencing execution cycle ${node.revisionCount}`);
+        const executionAttemptStartTime = Date.now();
 
-        let timeoutTimer: NodeJS.Timeout | undefined;
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          timeoutTimer = setTimeout(
-            () => reject(new Error(`Task timed out after ${node.timeoutMs}ms`)),
-            node.timeoutMs,
-          );
-          if (timeoutTimer.unref) {
-            timeoutTimer.unref();
+        // Transactional Pre-Modification File Snapshots
+        const targetFiles = extractTargetFilesFromNode(node);
+        if (node.inputs?.filePath) targetFiles.push(String(node.inputs.filePath));
+        if (node.inputs?.sourceFile) targetFiles.push(String(node.inputs.sourceFile));
+        if (node.inputs?.targetPath) targetFiles.push(String(node.inputs.targetPath));
+        if (node.inputs?.args?.filePath) targetFiles.push(String(node.inputs.args.filePath));
+        if (node.inputs?.args?.sourceFile) targetFiles.push(String(node.inputs.args.sourceFile));
+        if (node.inputs?.args?.targetPath) targetFiles.push(String(node.inputs.args.targetPath));
+
+        const uniqueTargetFiles = Array.from(new Set(targetFiles));
+        if (uniqueTargetFiles.length > 0) {
+          try {
+            globalRecoveryController.createPreModificationSnapshot(node.taskId, uniqueTargetFiles);
+          } catch (_e) {
+            // Snapshot may fail if file doesn't exist yet
           }
-        });
+        }
 
-        const dispatcher = options.customDispatcher ?? dispatchToAgent;
         let rawResponse: Partial<StructuredAgentResponse>;
-        try {
-          rawResponse = await Promise.race([
-            dispatcher(taskAdapter, context, callModelFn),
-            timeoutPromise,
-          ]);
-        } finally {
-          if (timeoutTimer) {
-            clearTimeout(timeoutTimer);
+
+        // Check if node has direct tool invocation specified
+        if (node.inputs && typeof node.inputs.tool === "string") {
+          const toolId = node.inputs.tool;
+          const toolArgs = node.inputs.args || node.inputs;
+          const toolExec = await globalToolRegistry.executeTool(
+            toolId,
+            toolArgs,
+            {
+              permissions: getPermissionsForRole(node.assignedAgentRole),
+              agentRole: node.assignedAgentRole,
+              taskId: node.taskId,
+              isSandboxed: true,
+            },
+          );
+
+          const toolObs: StructuredObservation = toolExec.observation || {
+            action: toolId,
+            tool: toolId,
+            inputs: toolArgs,
+            target: toolArgs.filePath || toolArgs.targetPath || toolArgs.testCommand,
+            success: toolExec.success,
+            status: toolExec.success ? "SUCCESS" : "FAILED",
+            exitCode: toolExec.output?.exitCode ?? (toolExec.success ? 0 : 1),
+            stdout: toolExec.output?.stdout || (typeof toolExec.output === "string" ? toolExec.output : ""),
+            stderr: toolExec.output?.stderr || toolExec.error || "",
+            before: toolExec.output?.bytesBefore !== undefined ? {
+              sizeBytes: toolExec.output.bytesBefore,
+              hash: toolExec.output.hashBefore,
+            } : undefined,
+            after: toolExec.output?.bytesAfter !== undefined ? {
+              sizeBytes: toolExec.output.bytesAfter,
+              hash: toolExec.output.hashAfter,
+            } : undefined,
+            error: toolExec.error,
+            timestamp: new Date().toISOString(),
+            durationMs: toolExec.executionTimeMs,
+          };
+
+          rawResponse = {
+            taskId: node.taskId,
+            agentRole: node.assignedAgentRole,
+            agentName: node.assignedAgentName,
+            result: toolExec.success
+              ? (typeof toolExec.output === "string"
+                  ? toolExec.output
+                  : `[Tool Execution: ${toolId} PASS] Output: ${JSON.stringify(toolExec.output ?? { success: true })}${toolArgs.content ? `\nCode Content:\n${String(toolArgs.content).slice(0, 1000)}` : ""}`)
+              : `Tool ${toolId} execution failed: ${toolExec.error || "Unknown error"}`,
+            confidence: toolExec.success ? 1.0 : 0.2,
+            observation: toolObs,
+            observations: [toolObs],
+            errors: toolExec.error ? [toolExec.error] : [],
+          };
+        } else {
+          // Adapt TaskGraphNode to JarvisTaskNode for dispatcher
+          const taskAdapter: JarvisTaskNode = {
+            taskId: node.taskId,
+            objective: currentObjective,
+            description: currentObjective,
+            requiredCapabilities: node.requiredCapabilities || [],
+            assignedAgentRole: node.assignedAgentRole,
+            assignedAgentName: node.assignedAgentName,
+            expectedOutput: node.expectedOutputs || "",
+            constraints: node.constraints || [],
+            risk: "low",
+            status: "running",
+          };
+
+          let timeoutTimer: NodeJS.Timeout | undefined;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutTimer = setTimeout(
+              () => reject(new Error(`Task timed out after ${node.timeoutMs}ms`)),
+              node.timeoutMs,
+            );
+            if (timeoutTimer.unref) {
+              timeoutTimer.unref();
+            }
+          });
+
+          const dispatcher = options.customDispatcher ?? dispatchToAgent;
+          try {
+            rawResponse = await Promise.race([
+              dispatcher(taskAdapter, context, callModelFn),
+              timeoutPromise,
+            ]);
+          } finally {
+            if (timeoutTimer) {
+              clearTimeout(timeoutTimer);
+            }
           }
         }
 
         const response: StructuredAgentResponse = {
-          taskId: taskAdapter.taskId,
-          agentRole: taskAdapter.assignedAgentRole,
-          agentName: taskAdapter.assignedAgentName,
-          status: "success",
+          taskId: node.taskId,
+          agentRole: node.assignedAgentRole,
+          agentName: node.assignedAgentName,
+          status: rawResponse.status || "success",
           result: rawResponse.result || "",
           confidence: rawResponse.confidence ?? 1,
           warnings: rawResponse.warnings || [],
@@ -238,13 +451,39 @@ export async function executeTaskGraph(
           ...rawResponse,
         };
 
+        // Stage 6: OBSERVE
+        transitionNode(node, "RUNNING", "OBSERVE", "Gathering structured execution observations");
+        node.observations = node.observations || [];
+
+        if (response.observations && Array.isArray(response.observations)) {
+          for (const obs of response.observations) {
+            node.observations.push(obs);
+          }
+        } else if (response.observation) {
+          node.observations.push(response.observation);
+        } else {
+          node.observations.push({
+            action: `dispatch_${node.assignedAgentRole}`,
+            tool: undefined,
+            inputs: node.inputs,
+            success: response.status === "success" && (!response.errors || response.errors.length === 0),
+            status: response.status === "success" ? "SUCCESS" : "FAILED",
+            stdout: typeof response.result === "string" ? response.result.slice(0, 1000) : "",
+            stderr: response.errors?.join("; ") || "",
+            timestamp: new Date().toISOString(),
+            durationMs: Date.now() - executionAttemptStartTime,
+          });
+        }
+
         node.completedAt = new Date().toISOString();
         node.result = response.result;
         node.confidence = response.confidence;
 
-        // Perform Evaluation & Critic Gate
+        // Stage 7: EVALUATE
+        transitionNode(node, "RUNNING", "EVALUATE", "Evaluating node execution results and observations against criteria");
+
         const evaluator = options.customEvaluator ?? evaluateTaskResult;
-        const rawEval = evaluator(node, response.result, context);
+        const rawEval = evaluator(node, response.result, context, node.observations);
         const evalRes: EvaluationResult = {
           taskId: node.taskId,
           evaluator: rawEval.evaluator || "critic",
@@ -268,15 +507,18 @@ export async function executeTaskGraph(
         trace.failureReasons = evalRes.failureReasons;
         trace.evaluationResult = evalRes;
 
+        // Stage 8: DECISION & RECOVERY
         if (evalRes.verdict === "PASS") {
           globalRecoveryController.clearSnapshots(node.taskId);
-          transitionTaskStatus(node, "SUCCESS");
+          transitionNode(node, "SUCCESS", "COMPLETE", "Evaluation passed successfully");
           executionSuccess = true;
         } else if (evalRes.verdict === "PARTIAL") {
           globalRecoveryController.clearSnapshots(node.taskId);
-          transitionTaskStatus(node, "PARTIAL");
+          transitionNode(node, "PARTIAL", "COMPLETE", "Evaluation accepted partial output");
           executionSuccess = true;
         } else if (evalRes.verdict === "REVISE") {
+          transitionNode(node, "RUNNING", "RECOVER", `Evaluation requested revision: ${evalRes.failureReasons.join("; ")}`);
+
           // Record self-healing lesson memory
           try {
             const memoryStore = CognitiveMemoryStore.getInstance();
@@ -296,7 +538,17 @@ export async function executeTaskGraph(
           if (node.revisionCount < node.maxRevisionCycles) {
             node.revisionCount += 1;
             trace.revisionCycle = node.revisionCount;
-            // Build self-correction feedback prompt
+
+            // Optional repair hook for devLoop mechanics
+            if (typeof node.inputs?.repairHook === "function") {
+              try {
+                await node.inputs.repairHook(node, evalRes, context);
+              } catch (_repHookErr) {
+                // Handled in next cycle
+              }
+            }
+
+            // Build self-correction feedback prompt for next cycle
             currentObjective = `[REVISION CYCLE ${node.revisionCount} / ${node.maxRevisionCycles}]
 Original Task: ${node.description}
 Evaluation Failure Reasons: ${evalRes.failureReasons.join("; ")}
@@ -310,11 +562,12 @@ Please revise and improve your output to strictly address these corrections.`;
             const modifiedFiles = globalRecoveryController.getSnapshottedFiles(node.taskId);
             const rollbackRes = globalRecoveryController.rollbackTaskModifications(node.taskId);
             trace.targetFiles = modifiedFiles;
-            transitionTaskStatus(node, "FAILED");
+            transitionNode(node, "FAILED", "FAILED", node.error);
             executionSuccess = true;
           }
         } else {
           // FAIL or ESCALATE: Trigger Adaptive Recovery Controller & Transactional Rollback
+          transitionNode(node, "FAILED", "RECOVER", `Evaluation failure / escalate: ${evalRes.failureReasons.join("; ")}`);
           const failureClass = globalRecoveryController.classifyFailure(evalRes.failureReasons.join("; "));
           const adaptiveAgent = failureClass === "PERMISSION_DENIED" || failureClass === "UNKNOWN" ? "agent_generalist_b" : "agent_generalist_a";
           const adaptiveRole = failureClass === "PERMISSION_DENIED" ? "SECURITY"
@@ -322,7 +575,6 @@ Please revise and improve your output to strictly address these corrections.`;
                              : failureClass === "SYNTAX_ERROR" || failureClass === "BUILD_FAILURE" || failureClass === "TEST_FAILURE" ? "DEBUGGER"
                              : "RECOVERY";
 
-          // Adapt generalist agent to handle failure
           adaptGeneralistRole(adaptiveAgent, adaptiveRole, { taskId: node.taskId });
 
           const modifiedFiles = globalRecoveryController.getSnapshottedFiles(node.taskId);
@@ -342,18 +594,25 @@ Please revise and improve your output to strictly address these corrections.`;
             timestamp: new Date().toISOString(),
           });
 
-          const isMaxRev = node.revisionCount >= node.maxRevisionCycles;
-          node.error = isMaxRev
-            ? `Exceeded maximum revision cycles (${node.maxRevisionCycles}). Escalating task failure: ${evalRes.failureReasons.join("; ")}`
-            : evalRes.failureReasons.join("; ") || "Task failed evaluation";
-          transitionTaskStatus(node, "FAILED");
-          executionSuccess = true;
+          if (node.retryCount < node.maxRetries) {
+            node.retryCount += 1;
+            transitionNode(node, "READY", "PLAN", `Retrying node (${node.retryCount}/${node.maxRetries})`);
+            return;
+          } else {
+            const isMaxRev = node.revisionCount >= node.maxRevisionCycles;
+            node.error = isMaxRev
+              ? `Exceeded maximum revision cycles (${node.maxRevisionCycles}). Escalating task failure: ${evalRes.failureReasons.join("; ")}`
+              : evalRes.failureReasons.join("; ") || "Task failed evaluation";
+            transitionNode(node, "FAILED", "FAILED", node.error);
+            executionSuccess = true;
+          }
         }
       }
     } catch (err: any) {
       const isTimeout = err.message?.includes("timed out");
       const errMessage = err.message || "Execution error";
       node.error = errMessage;
+      transitionNode(node, isTimeout ? "TIMEOUT" : "FAILED", "RECOVER", `Exception during execution: ${errMessage}`);
 
       const failureClass = globalRecoveryController.classifyFailure(errMessage);
       const modifiedFiles = globalRecoveryController.getSnapshottedFiles(node.taskId);
@@ -361,15 +620,12 @@ Please revise and improve your output to strictly address these corrections.`;
 
       if (node.retryCount < node.maxRetries) {
         node.retryCount += 1;
-        // Reset to READY for retry
-        transitionTaskStatus(node, isTimeout ? "TIMEOUT" : "FAILED");
-        transitionTaskStatus(node, "READY");
+        transitionNode(node, "READY", "PLAN", `Retrying node after exception (${node.retryCount}/${node.maxRetries})`);
       } else {
-        // Rollback any changed files if max retries exhausted
         const rollbackRes = globalRecoveryController.rollbackTaskModifications(node.taskId);
         rolledBack = rollbackRes.success;
         node.completedAt = new Date().toISOString();
-        transitionTaskStatus(node, isTimeout ? "TIMEOUT" : "FAILED");
+        transitionNode(node, isTimeout ? "TIMEOUT" : "FAILED", "FAILED", errMessage);
       }
 
       globalRecoveryController.recordRecoveryTrace({
@@ -389,6 +645,9 @@ Please revise and improve your output to strictly address these corrections.`;
       const latencyMs = Date.now() - taskStartTime;
       trace.endTime = node.completedAt || new Date().toISOString();
       trace.status = node.status;
+      trace.stage = node.stage;
+      trace.observations = [...(node.observations || [])];
+      trace.transitionHistory = [...(node.transitionHistory || [])];
       trace.latencyMs = latencyMs;
       trace.confidence = node.confidence;
       trace.error = node.error;
@@ -431,7 +690,7 @@ Please revise and improve your output to strictly address these corrections.`;
   // Final evaluation of remaining pending tasks after loop completion
   updatePendingNodesStatus();
 
-  // Final graph status determination
+  // Final graph status and lifecycle stage determination
   let succeededNodeCount = 0;
   let failedNodeCount = 0;
   let blockedNodeCount = 0;
@@ -444,15 +703,45 @@ Please revise and improve your output to strictly address these corrections.`;
 
   if (failedNodeCount === 0 && blockedNodeCount === 0) {
     graph.status = "COMPLETED";
+    graph.stage = "COMPLETE";
+    graph.transitionHistory.push({
+      stage: "COMPLETE",
+      status: "COMPLETED",
+      timestamp: new Date().toISOString(),
+      reason: "All graph tasks completed successfully",
+    });
   } else if (succeededNodeCount > 0) {
     graph.status = "PARTIAL";
+    graph.stage = "COMPLETE";
+    graph.transitionHistory.push({
+      stage: "COMPLETE",
+      status: "PARTIAL",
+      timestamp: new Date().toISOString(),
+      reason: "Graph completed with partial node success",
+    });
   } else {
     graph.status = "FAILED";
+    graph.stage = "FAILED";
+    graph.transitionHistory.push({
+      stage: "FAILED",
+      status: "FAILED",
+      timestamp: new Date().toISOString(),
+      reason: "Graph execution failed with no successful nodes",
+    });
+  }
+
+  // Flatten all observations from all nodes for easy consumption
+  const allObservations: StructuredObservation[] = [];
+  for (const node of graph.nodes) {
+    if (node.observations && node.observations.length > 0) {
+      allObservations.push(...node.observations);
+    }
   }
 
   return {
     graph,
     traces,
+    observations: allObservations,
     succeededNodeCount,
     failedNodeCount,
     blockedNodeCount,

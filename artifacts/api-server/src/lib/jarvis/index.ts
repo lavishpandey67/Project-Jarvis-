@@ -8,7 +8,7 @@ import { GraphEvaluationResult } from "./eval/types";
 import { CognitiveChallengeEngine } from "./eval/cognitiveChallenge";
 import { CognitiveChallengeReport } from "./memory/types";
 import { analyzeIntent, ModelCaller } from "./intentAnalyzer";
-import { createPlan } from "./planner";
+import { createPlan, planFromTaskGraph } from "./planner";
 import { FIVE_AGENT_WORKFORCE, getAllAgentContracts, getAgentByName, getAgentByRole } from "./registry";
 import { synthesizeResults } from "./synthesizer";
 import {
@@ -87,9 +87,9 @@ export async function processWithJarvisBrain(
     proposedPlanSummary: intent.objective,
   });
 
-  // Step 4: Create Plan & DAG Graph
-  const plan = createPlan(intent);
+  // Step 4: Create TaskGraph as Sole Planning Authority, then derive plan
   const taskGraph = createDAGFromIntent(intent);
+  const plan = planFromTaskGraph(taskGraph, intent);
 
   // Step 5: Execute DAG Graph via Task Engine
   let dagResult: DAGExecutionResult | undefined;
@@ -113,6 +113,7 @@ export async function processWithJarvisBrain(
           evidence: ["DAG Node execution trace"],
           warnings: node.error ? [node.error] : [],
           errors: node.error ? [node.error] : [],
+          observations: node.observations || [],
         });
       }
       if (!delegatedAgent) {
@@ -122,7 +123,7 @@ export async function processWithJarvisBrain(
   }
 
   // Step 6: Synthesize Results
-  const synthesis = await synthesizeResults(intent, plan, agentResponses, callModelFn);
+  const synthesis = await synthesizeResults(intent, plan, agentResponses, callModelFn, dagResult);
 
   // If cognitive challenge was triggered, annotate synthesis constructively
   if (cognitiveChallenge.triggered) {

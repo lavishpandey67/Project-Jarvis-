@@ -140,8 +140,8 @@ export function assignAdaptiveTaskProfile(
   const profile: TaskRoleProfile = {
     profileId,
     agentId,
-    temporaryRoleName: temporaryRoleName.toUpperCase(),
-    description: `Temporary adaptive profile '${temporaryRoleName.toUpperCase()}' assigned to ${agentId}`,
+    temporaryRoleName,
+    description: `Temporary adaptive profile '${temporaryRoleName}' assigned to ${agentId}`,
     capabilities,
     authorizedToolIds,
     permissionBoundary,

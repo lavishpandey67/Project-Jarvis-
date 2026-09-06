@@ -112,6 +112,8 @@ export interface StructuredAgentResponse {
   warnings: string[];
   errors: string[];
   suggestedNextAction?: string;
+  observation?: any;
+  observations?: any[];
 }
 
 export interface JarvisSynthesis {

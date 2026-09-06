@@ -8,6 +8,7 @@ import {
 import { ModelCaller } from "./intentAnalyzer";
 import { PolyglotASTEngine, CodebaseGraph, CrossLanguageTracer } from "./codeIntel";
 import { globalToolRegistry } from "./tools/registry";
+import { StructuredObservation } from "./dag/types";
 
 function parseJsonHelper<T>(raw: string): T {
   const match = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1] ?? raw;
@@ -56,6 +57,7 @@ export async function dispatchToAgent(
 
   // Real Capability Bridge: Workspace File Read / Write / Test Runner / Inspection
   let realToolObservation: any = null;
+  let structuredObservation: StructuredObservation | null = null;
   let realToolEvidence: string[] = [];
 
   const taskText = task.objective + " " + task.description;
@@ -66,9 +68,9 @@ export async function dispatchToAgent(
   const isPatchTask = /(?:patch|replace|substitute|surgical)\s+(?:in|on|to)?\s*(?:file\s+)?([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/i.test(taskText) &&
                       (taskText.includes("targetContent") || taskText.includes("replace:") || taskText.includes("target:") || taskText.includes("with:"));
 
-  const isWriteTask = /(?:write|create|save|update|modify|fix|repair)\s+(?:to\s+)?(?:file\s+)?([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)/i.test(
-    taskText,
-  );
+  const isWriteTask =
+    /(?:write|create|save|update|modify|fix|repair|record|add)\b/i.test(taskText) ||
+    (task.assignedAgentRole === "builder" && !isTestTask && !isPatchTask);
 
   const filePathMatch = taskText.match(
     /(?:file|read|inspect|path|content of|write|create|save|update|modify|patch|fix|in|test)\s+([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)|([a-zA-Z0-9_\-\.\/]+\.(?:json|md|ts|py|js|mjs|tsx|css|html|txt))/i,
@@ -103,6 +105,20 @@ export async function dispatchToAgent(
 
       if (toolExec.output) {
         realToolObservation = toolExec.output;
+        structuredObservation = {
+          action: "tool_run_test",
+          tool: "tool_run_test",
+          inputs: { testCommand, targetPath: detectedFilePath },
+          target: detectedFilePath,
+          success: toolExec.success && toolExec.output.passed === true,
+          status: toolExec.success ? (toolExec.output.passed === true ? "SUCCESS" : "TEST_FAILED") : "TOOL_FAILED",
+          exitCode: toolExec.output.exitCode,
+          stdout: toolExec.output.stdout,
+          stderr: toolExec.output.stderr || toolExec.error,
+          error: toolExec.error,
+          durationMs: toolExec.output.durationMs || toolExec.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        };
         if (toolExec.success && toolExec.output.passed) {
           realToolEvidence.push(
             `[Real Execution: tool_run_test PASS] Command '${toolExec.output.testCommand}' passed with Exit Code 0 in ${toolExec.output.durationMs}ms.\nStdout: ${toolExec.output.stdout.slice(0, 300)}`,
@@ -113,6 +129,17 @@ export async function dispatchToAgent(
           );
         }
       } else if (!toolExec.success) {
+        structuredObservation = {
+          action: "tool_run_test",
+          tool: "tool_run_test",
+          inputs: { testCommand, targetPath: detectedFilePath },
+          target: detectedFilePath,
+          success: false,
+          status: "TOOL_FAILED",
+          error: toolExec.error,
+          durationMs: toolExec.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        };
         realToolEvidence.push(
           `[Tool Execution Denied/Failed: tool_run_test] ${toolExec.error}`,
         );
@@ -138,10 +165,33 @@ export async function dispatchToAgent(
 
       if (toolExec.success && toolExec.output) {
         realToolObservation = toolExec.output;
+        structuredObservation = {
+          action: "tool_file_patch",
+          tool: "tool_file_patch",
+          inputs: { filePath: detectedFilePath, targetContent, replacementContent },
+          target: detectedFilePath,
+          success: toolExec.success && Boolean(toolExec.output.verified),
+          status: toolExec.success ? "SUCCESS" : "PATCH_FAILED",
+          before: { sizeBytes: toolExec.output.bytesBefore, hash: toolExec.output.hashBefore },
+          after: { sizeBytes: toolExec.output.bytesAfter, hash: toolExec.output.hashAfter },
+          durationMs: toolExec.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        };
         realToolEvidence.push(
           `[Real Execution: tool_file_patch] Patched '${toolExec.output.filePath}' (${toolExec.output.bytesBefore}B -> ${toolExec.output.bytesAfter}B). SHA256: ${toolExec.output.hashAfter}`,
         );
       } else if (!toolExec.success) {
+        structuredObservation = {
+          action: "tool_file_patch",
+          tool: "tool_file_patch",
+          inputs: { filePath: detectedFilePath, targetContent, replacementContent },
+          target: detectedFilePath,
+          success: false,
+          status: "PATCH_FAILED",
+          error: toolExec.error,
+          durationMs: toolExec.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        };
         realToolEvidence.push(
           `[Tool Execution Denied/Failed: tool_file_patch] ${toolExec.error}`,
         );
@@ -168,10 +218,33 @@ export async function dispatchToAgent(
 
       if (toolExec.success && toolExec.output) {
         realToolObservation = toolExec.output;
+        structuredObservation = {
+          action: "tool_file_write",
+          tool: "tool_file_write",
+          inputs: { filePath: detectedFilePath },
+          target: detectedFilePath,
+          success: toolExec.success && Boolean(toolExec.output.verified),
+          status: toolExec.success ? "SUCCESS" : "WRITE_FAILED",
+          before: { sizeBytes: toolExec.output.bytesBefore, hash: toolExec.output.hashBefore },
+          after: { sizeBytes: toolExec.output.bytesAfter, hash: toolExec.output.hashAfter },
+          durationMs: toolExec.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        };
         realToolEvidence.push(
           `[Real Execution: tool_file_write] Wrote and verified ${toolExec.output.bytesAfter} bytes (${toolExec.output.lineCount} lines) to '${toolExec.output.filePath}'. SHA256: ${toolExec.output.hashAfter} (Changed: ${toolExec.output.changed})`,
         );
       } else if (!toolExec.success) {
+        structuredObservation = {
+          action: "tool_file_write",
+          tool: "tool_file_write",
+          inputs: { filePath: detectedFilePath },
+          target: detectedFilePath,
+          success: false,
+          status: "WRITE_FAILED",
+          error: toolExec.error,
+          durationMs: toolExec.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        };
         realToolEvidence.push(
           `[Tool Execution Denied/Failed: tool_file_write] ${toolExec.error}`,
         );
@@ -190,10 +263,33 @@ export async function dispatchToAgent(
 
       if (toolExec.success && toolExec.output) {
         realToolObservation = toolExec.output;
+        structuredObservation = {
+          action: "tool_file_read",
+          tool: "tool_file_read",
+          inputs: { filePath: detectedFilePath },
+          target: detectedFilePath,
+          success: true,
+          status: "SUCCESS",
+          before: { sizeBytes: toolExec.output.sizeBytes, content: toolExec.output.content },
+          after: { sizeBytes: toolExec.output.sizeBytes, content: toolExec.output.content },
+          durationMs: toolExec.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        };
         realToolEvidence.push(
           `[Real Execution: tool_file_read] Read ${toolExec.output.sizeBytes} bytes (${toolExec.output.lineCount} lines) from '${toolExec.output.filePath}' in ${toolExec.executionTimeMs}ms`,
         );
       } else if (!toolExec.success) {
+        structuredObservation = {
+          action: "tool_file_read",
+          tool: "tool_file_read",
+          inputs: { filePath: detectedFilePath },
+          target: detectedFilePath,
+          success: false,
+          status: "READ_FAILED",
+          error: toolExec.error,
+          durationMs: toolExec.executionTimeMs,
+          timestamp: new Date().toISOString(),
+        };
         realToolEvidence.push(
           `[Tool Execution Denied/Failed: tool_file_read] ${toolExec.error}`,
         );
@@ -218,6 +314,8 @@ export async function dispatchToAgent(
       }
       fallback.evidence.push(...realToolEvidence);
     }
+    fallback.observation = structuredObservation || undefined;
+    fallback.observations = structuredObservation ? [structuredObservation] : [];
     return fallback;
   }
 
@@ -319,6 +417,8 @@ Perform your specialized work for the assigned task and return JSON ONLY matchin
       warnings: Array.isArray(parsed.warnings) ? parsed.warnings : [],
       errors: Array.isArray(parsed.errors) ? parsed.errors : [],
       suggestedNextAction: parsed.suggestedNextAction || undefined,
+      observation: structuredObservation || undefined,
+      observations: structuredObservation ? [structuredObservation] : [],
     };
   } catch (err) {
     throw err;

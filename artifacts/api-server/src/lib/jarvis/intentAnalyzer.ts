@@ -31,7 +31,7 @@ export function fallbackIntentAnalysis(userMessage: string): IntentAnalysis {
     requiredCapabilities.push("planning", "prioritization", "decision_analysis");
     delegationRequired = true;
   }
-  if (/\b(code|build|implement|refactor|function|script|bug|fix|create|component|dev)\b/.test(lower)) {
+  if (/\b(code|build|builder|write|implement|refactor|function|script|bug|fix|create|component|dev)\b/.test(lower)) {
     if (!primaryDomainSet) { domain = "engineering"; primaryDomainSet = true; }
     requiredCapabilities.push("code_generation", "implementation", "debugging");
     delegationRequired = true;

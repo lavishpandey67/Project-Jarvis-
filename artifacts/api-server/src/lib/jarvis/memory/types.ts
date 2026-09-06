@@ -171,6 +171,7 @@ export interface ToolExecutionResult {
   error?: string;
   logs?: string[];
   executionTimeMs: number;
+  observation?: any;
 }
 
 export interface ToolExecutionTrace {

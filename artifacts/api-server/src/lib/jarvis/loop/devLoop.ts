@@ -175,6 +175,7 @@ export async function runAutonomousSoftwareLoop(
       failedNode,
       `[Real Workspace Test Execution Observation]: Command: 'node ${options.testScript}', ExitCode: ${testExec.output?.exitCode}, Passed: false.\nStderr: ${testExec.output?.stderr}\nFailureReason: ${testExec.output?.testFailureReason}`,
       context,
+      testExec.observation ? [testExec.observation] : [],
     );
 
     steps.push({
