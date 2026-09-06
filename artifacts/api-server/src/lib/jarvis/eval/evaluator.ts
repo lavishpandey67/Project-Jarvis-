@@ -63,7 +63,7 @@ export function evaluateTaskResult(
     // For evaluating current state in multi-cycle revision loops, evaluate latest observation per unique action/tool/target
     const latestObservationsMap = new Map<string, StructuredObservation>();
     for (const obs of allObservations) {
-      const key = `${obs.action}_${obs.tool || ""}_${obs.target || ""}`;
+      const key = `${obs.action}_${obs.tool || ""}`;
       latestObservationsMap.set(key, obs);
     }
     const currentCycleObservations = Array.from(latestObservationsMap.values());

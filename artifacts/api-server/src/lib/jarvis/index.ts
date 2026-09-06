@@ -47,6 +47,9 @@ export * from "./recoveryController";
 export * from "./eval/cognitiveChallenge";
 export * from "./memory/patternTracker";
 export * from "./pythonBridge/client";
+export * from "./executionKernel";
+
+import { reconstructTaskGraph } from "./executionKernel";
 
 export interface JarvisExecutionResult {
   intent: IntentAnalysis;
@@ -71,6 +74,13 @@ export async function processWithJarvisBrain(
     tasks: Array<{ id: number; title: string; status: string }>;
   },
   callModelFn?: ModelCaller,
+  options?: {
+    executionId?: string;
+    interruptAfterNodeId?: string;
+    customDispatcher?: any;
+    customEvaluator?: any;
+    taskGraph?: TaskGraph;
+  },
 ): Promise<JarvisExecutionResult> {
   // Step 1: Scope Context
   const scopedContext = scopeContextForTask(rawWorkspaceData);
@@ -88,7 +98,13 @@ export async function processWithJarvisBrain(
   });
 
   // Step 4: Create TaskGraph as Sole Planning Authority, then derive plan
-  const taskGraph = createDAGFromIntent(intent);
+  let taskGraph: TaskGraph | null = options?.taskGraph ?? null;
+  if (!taskGraph && options?.executionId) {
+    taskGraph = await reconstructTaskGraph(options.executionId);
+  }
+  if (!taskGraph) {
+    taskGraph = createDAGFromIntent(intent);
+  }
   const plan = planFromTaskGraph(taskGraph, intent);
 
   // Step 5: Execute DAG Graph via Task Engine
@@ -98,7 +114,13 @@ export async function processWithJarvisBrain(
   let delegatedAgent: AgentContract | undefined;
 
   if (taskGraph.nodes.length > 0) {
-    dagResult = await executeTaskGraph(taskGraph, scopedContext, { callModelFn });
+    dagResult = await executeTaskGraph(taskGraph, scopedContext, {
+      callModelFn,
+      executionId: options?.executionId,
+      interruptAfterNodeId: options?.interruptAfterNodeId,
+      customDispatcher: options?.customDispatcher,
+      customEvaluator: options?.customEvaluator,
+    });
     graphEvaluation = evaluateGraphObjective(taskGraph, dagResult, scopedContext);
 
     for (const node of dagResult.graph.nodes) {

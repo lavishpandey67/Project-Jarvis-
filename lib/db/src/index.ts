@@ -2,21 +2,40 @@ import { drizzle as drizzleNodePg } from "drizzle-orm/node-postgres";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
+import * as path from "node:path";
+import * as fs from "node:fs";
 import * as schema from "./schema";
 
 const { Pool } = pg;
 
 export let pool: pg.Pool | undefined = undefined;
 export let db: any;
+export let pgliteClient: PGlite | undefined = undefined;
 
 if (process.env.DATABASE_URL) {
   pool = new Pool({ connectionString: process.env.DATABASE_URL });
   db = drizzleNodePg(pool, { schema });
 } else {
-  console.warn(
-    "[AI Studio] DATABASE_URL is not set. Initializing in-memory PGlite database.",
-  );
-  const pglite = new PGlite();
+  const isInMemory = process.env.PGLITE_IN_MEMORY === "true";
+  const pgliteDir = isInMemory
+    ? undefined
+    : (process.env.PGLITE_DATA_DIR || path.resolve(process.cwd(), ".data/pglite"));
+
+  if (pgliteDir) {
+    try {
+      fs.mkdirSync(pgliteDir, { recursive: true });
+    } catch (_err) {}
+    console.warn(
+      `[Jarvis DB] DATABASE_URL is not set. Initializing persistent PGlite database at '${pgliteDir}'.`,
+    );
+  } else {
+    console.warn(
+      "[Jarvis DB] DATABASE_URL is not set. Initializing in-memory PGlite database.",
+    );
+  }
+
+  const pglite = pgliteDir ? new PGlite(pgliteDir) : new PGlite();
+  pgliteClient = pglite;
   db = drizzlePglite(pglite, { schema });
 
   // Initialize schema tables synchronously/top-level for PGlite
@@ -319,6 +338,21 @@ if (process.env.DATABASE_URL) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+}
+
+export async function closeDatabase(): Promise<void> {
+  if (pgliteClient) {
+    try {
+      await pgliteClient.close();
+    } catch (_e) {}
+    pgliteClient = undefined;
+  }
+  if (pool) {
+    try {
+      await pool.end();
+    } catch (_e) {}
+    pool = undefined;
+  }
 }
 
 export * from "./schema";

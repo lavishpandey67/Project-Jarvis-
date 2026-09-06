@@ -30,6 +30,8 @@ import {
   ContextRetrievalEngine,
   PythonIntelligenceClient,
   processWithJarvisBrain,
+  InterruptedExecutionError,
+  TaskGraph,
 } from "./jarvis";
 import {
   authorizeExecution,
@@ -380,7 +382,13 @@ export async function getSummary() {
 
 export async function respondWithCompanion(
   body: unknown,
-  options?: { executionId?: string },
+  options?: {
+    executionId?: string;
+    interruptAfterNodeId?: string;
+    taskGraph?: TaskGraph;
+    customDispatcher?: any;
+    customEvaluator?: any;
+  },
 ) {
   const parsed = RespondWithCompanionBody.parse(body);
   const conversation = await getConversation(parsed.conversationId);
@@ -467,10 +475,28 @@ export async function respondWithCompanion(
   const attemptId = await beginExecutionAttempt(executionId);
   let jarvisResult;
   try {
-    jarvisResult = await processWithJarvisBrain(parsed.message, rawWorkspaceData, modelCallerFn);
+    jarvisResult = await processWithJarvisBrain(
+      parsed.message,
+      rawWorkspaceData,
+      modelCallerFn,
+      {
+        executionId,
+        interruptAfterNodeId: options?.interruptAfterNodeId,
+        taskGraph: options?.taskGraph,
+        customDispatcher: options?.customDispatcher,
+        customEvaluator: options?.customEvaluator,
+      },
+    );
     await completeExecutionAttempt(attemptId, "SUCCEEDED");
     await finalizeExecution(executionId, jarvisResult);
-  } catch (error) {
+  } catch (error: any) {
+    if (
+      error instanceof InterruptedExecutionError ||
+      error?.name === "InterruptedExecutionError"
+    ) {
+      await completeExecutionAttempt(attemptId, "INTERRUPTED", error.message);
+      throw error;
+    }
     await completeExecutionAttempt(
       attemptId,
       "FAILED",
@@ -627,10 +653,18 @@ export async function getDurableExecutionTrace(executionId: string) {
   return trace;
 }
 
-export async function resumeCompanionExecution(executionId: string) {
+export async function resumeCompanionExecution(
+  executionId: string,
+  options?: {
+    interruptAfterNodeId?: string;
+    taskGraph?: TaskGraph;
+    customDispatcher?: any;
+    customEvaluator?: any;
+  },
+) {
   const trace = await getDurableExecutionTrace(executionId);
   const journal = trace.journal as { state?: string; conversationId?: number; objective?: string };
-  if (["COMPLETED", "FAILED", "ESCALATED"].includes(String(journal.state))) {
+  if (journal.state === "COMPLETED") {
     throw new Error(`Execution is already terminal in state '${journal.state}'.`);
   }
   if (!journal.conversationId || !journal.objective) {
@@ -638,6 +672,6 @@ export async function resumeCompanionExecution(executionId: string) {
   }
   return respondWithCompanion(
     { conversationId: journal.conversationId, message: journal.objective },
-    { executionId },
+    { executionId, ...options },
   );
 }

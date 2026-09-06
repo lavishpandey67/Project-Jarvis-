@@ -17,6 +17,7 @@ import {
 } from "@workspace/db";
 import { CognitiveMemoryStore } from "./memory/store";
 import type { JarvisExecutionResult } from "./index";
+import type { TaskGraph, TaskGraphNode } from "./dag/types";
 
 export type KernelState =
   | "PROPOSED"
@@ -29,18 +30,18 @@ export type KernelState =
   | "RECOVERING"
   | "ESCALATED";
 
-const terminalStates = new Set<KernelState>(["COMPLETED", "FAILED", "ESCALATED"]);
+const terminalStates = new Set<KernelState>(["COMPLETED"]);
 
 const legalTransitions: Record<KernelState, KernelState[]> = {
   PROPOSED: ["AUTHORIZED", "FAILED"],
   AUTHORIZED: ["EXECUTED", "FAILED", "RECOVERING"],
-  EXECUTED: ["OBSERVED", "FAILED", "RECOVERING"],
-  OBSERVED: ["EVALUATED", "FAILED", "RECOVERING"],
-  EVALUATED: ["COMPLETED", "FAILED", "RECOVERING", "ESCALATED"],
+  EXECUTED: ["OBSERVED", "EVALUATED", "FAILED", "RECOVERING", "COMPLETED", "EXECUTED"],
+  OBSERVED: ["EVALUATED", "EXECUTED", "FAILED", "RECOVERING"],
+  EVALUATED: ["COMPLETED", "FAILED", "RECOVERING", "ESCALATED", "EXECUTED", "OBSERVED"],
   COMPLETED: [],
   FAILED: ["RECOVERING"],
-  RECOVERING: ["AUTHORIZED", "EXECUTED", "FAILED", "ESCALATED"],
-  ESCALATED: [],
+  RECOVERING: ["AUTHORIZED", "EXECUTED", "FAILED", "ESCALATED", "OBSERVED", "EVALUATED"],
+  ESCALATED: ["RECOVERING", "FAILED"],
 };
 
 export interface ExecutionTrace {
@@ -219,6 +220,10 @@ export async function transitionExecution(
 }
 
 export async function authorizeExecution(executionId: string): Promise<string> {
+  const journal = await currentJournal(executionId);
+  if (journal && (journal.state === "AUTHORIZED" || journal.state === "EXECUTED" || journal.state === "RECOVERING")) {
+    return `${executionId}:authorize:existing`;
+  }
   const actionId = `${executionId}:authorize:${Date.now()}`;
   await db.insert(executionActionsTable).values({
     actionId,
@@ -233,6 +238,279 @@ export async function authorizeExecution(executionId: string): Promise<string> {
     authority: "deterministic-kernel",
   });
   return actionId;
+}
+
+export async function authorizeNodeAction(
+  executionId: string,
+  nodeId: string,
+  actionType = "EXECUTE_NODE",
+  details?: any,
+): Promise<string> {
+  const actionId = `${executionId}:act:${nodeId}:${Date.now()}`;
+  await db
+    .insert(executionActionsTable)
+    .values({
+      actionId,
+      executionId,
+      nodeId,
+      actionType,
+      status: "AUTHORIZED",
+      authorizedBy: "jarvis-policy",
+      authorizedAt: now(),
+      input: json(details),
+    })
+    .onConflictDoNothing();
+
+  await appendEvent(executionId, {
+    kind: "ACTION_AUTHORIZED",
+    nodeId,
+    payload: { actionId, actionType, details },
+  });
+  return actionId;
+}
+
+export async function persistNodeState(
+  executionId: string,
+  nodeId: string,
+  state: string,
+  payload?: { input?: any; output?: any; error?: string | null; retryCount?: number },
+): Promise<void> {
+  const updateFields: Record<string, any> = {
+    state,
+    updatedAt: now(),
+  };
+  if (payload?.output !== undefined) {
+    updateFields.output = json(payload.output);
+  }
+  if (payload?.error !== undefined) {
+    updateFields.error = payload.error;
+  }
+  if (payload?.retryCount !== undefined) {
+    updateFields.retryCount = payload.retryCount;
+  }
+
+  await db
+    .update(executionGraphNodesTable)
+    .set(updateFields)
+    .where(
+      and(
+        eq(executionGraphNodesTable.executionId, executionId),
+        eq(executionGraphNodesTable.nodeId, nodeId),
+      ),
+    );
+
+  await db
+    .update(executionJournalsTable)
+    .set({ currentNodeId: nodeId, updatedAt: now() })
+    .where(eq(executionJournalsTable.executionId, executionId));
+
+  await appendEvent(executionId, {
+    kind: "NODE_STATE_TRANSITION",
+    nodeId,
+    payload: { state, ...payload },
+  });
+}
+
+export async function persistToolExecution(
+  executionId: string,
+  input: {
+    actionId?: string;
+    nodeId?: string;
+    toolId: string;
+    toolName: string;
+    input: any;
+    output: any;
+    success: boolean;
+    error?: string;
+    executionTimeMs?: number;
+  },
+): Promise<string> {
+  const toolExecutionId = `${executionId}:tool:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`;
+  await db
+    .insert(executionToolExecutionsTable)
+    .values({
+      toolExecutionId,
+      executionId,
+      actionId: input.actionId ?? null,
+      nodeId: input.nodeId ?? null,
+      toolId: input.toolId,
+      toolName: input.toolName,
+      input: json(input.input),
+      output: json(input.output),
+      success: input.success ? 1 : 0,
+      error: input.error ?? null,
+      executionTimeMs: input.executionTimeMs || 0,
+      startedAt: now(),
+      endedAt: now(),
+    })
+    .onConflictDoNothing();
+
+  if (input.actionId) {
+    await db
+      .update(executionActionsTable)
+      .set({
+        status: input.success ? "EXECUTED" : "FAILED",
+        executedAt: now(),
+        updatedAt: now(),
+      })
+      .where(eq(executionActionsTable.actionId, input.actionId));
+  }
+
+  await appendEvent(executionId, {
+    kind: "TOOL_EXECUTED",
+    nodeId: input.nodeId,
+    payload: {
+      toolExecutionId,
+      toolId: input.toolId,
+      toolName: input.toolName,
+      success: input.success,
+      executionTimeMs: input.executionTimeMs,
+    },
+  });
+
+  return toolExecutionId;
+}
+
+export async function updateRecovery(
+  recoveryId: string,
+  status: string,
+  observationId?: string,
+): Promise<void> {
+  const updateFields: Record<string, any> = { status };
+  if (observationId) {
+    updateFields.observationId = observationId;
+  }
+  await db
+    .update(executionRecoveriesTable)
+    .set(updateFields)
+    .where(eq(executionRecoveriesTable.recoveryId, recoveryId));
+}
+
+export async function initExecutionGraph(
+  executionId: string,
+  graph: TaskGraph,
+): Promise<Map<string, { state: string; output?: any; error?: string | null; retryCount: number }>> {
+  await db
+    .update(executionJournalsTable)
+    .set({ graphId: graph.graphId, updatedAt: now() })
+    .where(eq(executionJournalsTable.executionId, executionId));
+
+  await db
+    .insert(executionGraphsTable)
+    .values({
+      graphId: graph.graphId,
+      executionId,
+      requestId: graph.requestId,
+      objective: graph.objective,
+      status: graph.status || "RUNNING",
+    })
+    .onConflictDoUpdate({
+      target: executionGraphsTable.graphId,
+      set: { status: graph.status || "RUNNING", updatedAt: now() },
+    });
+
+  const existingNodes = await db
+    .select()
+    .from(executionGraphNodesTable)
+    .where(eq(executionGraphNodesTable.executionId, executionId));
+
+  const existingMap = new Map<string, { state: string; output?: any; error?: string | null; retryCount: number }>();
+  for (const row of existingNodes) {
+    existingMap.set(row.nodeId, {
+      state: row.state,
+      output: parse(row.output),
+      error: row.error,
+      retryCount: row.retryCount,
+    });
+  }
+
+  for (const node of graph.nodes) {
+    const existing = existingMap.get(node.taskId);
+    if (!existing) {
+      await db
+        .insert(executionGraphNodesTable)
+        .values({
+          nodeRecordId: `${executionId}:${node.taskId}`,
+          executionId,
+          graphId: graph.graphId,
+          nodeId: node.taskId,
+          state: node.status || "PENDING",
+          assignedAgentRole: node.assignedAgentRole,
+          assignedAgentName: node.assignedAgentName,
+          dependencies: json(node.dependencies),
+          input: json({
+            description: node.description,
+            constraints: node.constraints,
+            inputs: node.inputs ?? {},
+          }),
+          output: null,
+          error: null,
+          retryCount: node.retryCount || 0,
+          maxRetries: node.maxRetries || 0,
+        })
+        .onConflictDoNothing();
+    }
+  }
+
+  return existingMap;
+}
+
+export async function loadExecutionGraphState(executionId: string) {
+  const nodes = await db
+    .select()
+    .from(executionGraphNodesTable)
+    .where(eq(executionGraphNodesTable.executionId, executionId));
+  return nodes.map((n: any) => ({
+    ...n,
+    dependencies: parse(n.dependencies),
+    input: parse(n.input),
+    output: parse(n.output),
+  }));
+}
+
+export async function reconstructTaskGraph(executionId: string): Promise<TaskGraph | null> {
+  const [graphRow] = await db
+    .select()
+    .from(executionGraphsTable)
+    .where(eq(executionGraphsTable.executionId, executionId))
+    .limit(1);
+  if (!graphRow) return null;
+
+  const nodeRows = await db
+    .select()
+    .from(executionGraphNodesTable)
+    .where(eq(executionGraphNodesTable.executionId, executionId));
+  if (!nodeRows || nodeRows.length === 0) return null;
+
+  const nodes: TaskGraphNode[] = nodeRows.map((row: any) => {
+    const inputObj = (parse(row.input) as any) || {};
+    return {
+      taskId: row.nodeId,
+      graphId: graphRow.graphId,
+      description: inputObj.description || row.nodeId,
+      assignedAgentRole: row.assignedAgentRole || "generalist_a",
+      assignedAgentName: row.assignedAgentName || "Generalist Agent A",
+      requiredCapabilities: [],
+      dependencies: (parse(row.dependencies) as string[]) || [],
+      inputs: inputObj.inputs ?? {},
+      expectedOutputs: "",
+      constraints: inputObj.constraints || [],
+      risk: "low",
+      status: row.state as any,
+      retryCount: row.retryCount || 0,
+      maxRetries: row.maxRetries || 2,
+      timeoutMs: 60000,
+    };
+  });
+
+  return {
+    graphId: graphRow.graphId,
+    requestId: graphRow.requestId,
+    objective: graphRow.objective,
+    nodes,
+    status: (graphRow.status as any) || "RUNNING",
+    createdAt: graphRow.createdAt?.toISOString?.() || new Date().toISOString(),
+  };
 }
 
 export async function beginExecutionAttempt(executionId: string, nodeId?: string): Promise<string> {
@@ -261,7 +539,7 @@ export async function beginExecutionAttempt(executionId: string, nodeId?: string
 
 export async function completeExecutionAttempt(
   attemptId: string,
-  status: "SUCCEEDED" | "FAILED",
+  status: "SUCCEEDED" | "FAILED" | "INTERRUPTED",
   error?: string,
 ): Promise<void> {
   await db

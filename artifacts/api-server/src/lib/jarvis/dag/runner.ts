@@ -11,6 +11,19 @@ import { globalToolRegistry } from "../tools/registry";
 import { ToolPermissionClass } from "../memory/types";
 import { JarvisTaskNode, ScopedContext, StructuredAgentResponse } from "../types";
 import {
+  initExecutionGraph,
+  persistNodeState,
+  authorizeNodeAction,
+  beginExecutionAttempt,
+  completeExecutionAttempt,
+  persistToolExecution,
+  recordObservation,
+  recordEvaluation,
+  recordRecovery,
+  updateRecovery,
+  transitionExecution,
+} from "../executionKernel";
+import {
   DAGExecutionResult,
   TaskExecutionTrace,
   TaskGraph,
@@ -21,6 +34,13 @@ import {
   NodeTransitionRecord,
 } from "./types";
 import { validateTaskGraph } from "./validator";
+
+export class InterruptedExecutionError extends Error {
+  constructor(public executionId: string, public nodeId: string) {
+    super(`Execution '${executionId}' was interrupted after node '${nodeId}' as requested.`);
+    this.name = "InterruptedExecutionError";
+  }
+}
 
 export const LEGAL_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   PENDING: ["READY", "BLOCKED", "CANCELLED"],
@@ -142,6 +162,8 @@ export interface DAGRunnerOptions {
     context: ScopedContext,
     observations?: StructuredObservation[],
   ) => Partial<EvaluationResult> & { verdict: EvaluationVerdict };
+  executionId?: string;
+  interruptAfterNodeId?: string;
 }
 
 export async function executeTaskGraph(
@@ -199,6 +221,56 @@ export async function executeTaskGraph(
 
   graph.status = "RUNNING";
   graph.stage = "EXECUTE";
+
+  // Reconcile with authoritative durable execution state if executionId provided
+  if (options.executionId) {
+    const existingStateMap = await initExecutionGraph(options.executionId, graph);
+    for (const node of graph.nodes) {
+      const existing = existingStateMap.get(node.taskId);
+      if (existing && (existing.state === "SUCCESS" || existing.state === "PARTIAL")) {
+        node.status = existing.state as any;
+        node.stage = "COMPLETE";
+        node.result = existing.output?.result || (typeof existing.output === "string" ? existing.output : "");
+        node.completedAt = new Date().toISOString();
+        node.latestEvaluation = {
+          taskId: node.taskId,
+          evaluator: "RestoredExecutionJournal",
+          schemaScore: 1,
+          goalScore: 1,
+          constraintScore: 1,
+          groundingScore: 1,
+          criticScore: 1,
+          confidenceScore: 1,
+          overallScore: 1,
+          verdict: "PASS",
+          failureReasons: [],
+          requiredCorrections: [],
+          evaluatedAt: node.completedAt,
+        };
+        traces.push({
+          graphId: graph.graphId,
+          taskId: node.taskId,
+          agentRole: node.assignedAgentRole,
+          agentName: node.assignedAgentName,
+          startTime: node.startedAt || new Date().toISOString(),
+          endTime: node.completedAt,
+          status: existing.state as any,
+          stage: "COMPLETE",
+          retryCount: existing.retryCount || 0,
+          verdict: "PASS",
+          evaluationResult: node.latestEvaluation,
+          observations: [],
+          transitionHistory: [],
+          latencyMs: 0,
+        });
+      } else if (existing && (existing.state === "RUNNING" || existing.state === "FAILED")) {
+        node.status = "PENDING";
+        node.stage = "PLAN";
+        node.retryCount = existing.retryCount || 0;
+      }
+    }
+  }
+
   const nodeMap = new Map<string, TaskGraphNode>();
   for (const node of graph.nodes) {
     node.observations = node.observations || [];
@@ -277,9 +349,27 @@ export async function executeTaskGraph(
       revisionCycle: node.revisionCount,
     };
 
+    if (options.executionId) {
+      await persistNodeState(options.executionId, node.taskId, "RUNNING", { retryCount: node.retryCount });
+      await transitionExecution(options.executionId, "EXECUTED", { currentNodeId: node.taskId });
+    }
+
+    let actionId: string | undefined;
+    let attemptId: string | undefined;
+    let lastObservationId: string | undefined;
+    let recoveryId: string | undefined;
+
     try {
       // Stage 4: AUTHORIZE
       transitionNode(node, "RUNNING", "AUTHORIZE", "Evaluating execution budget and permission boundaries");
+      if (options.executionId) {
+        actionId = await authorizeNodeAction(
+          options.executionId,
+          node.taskId,
+          "EXECUTE_NODE",
+          { description: node.description, requiredCapabilities: node.requiredCapabilities },
+        );
+      }
 
       // 1. Budget Controller Guard Check
       const budgetCheck = globalBudgetController.checkBudget(graph.graphId, { taskNodesCount: 1 });
@@ -291,6 +381,9 @@ export async function executeTaskGraph(
           reason: node.error,
         };
         transitionNode(node, "FAILED", "FAILED", node.error);
+        if (options.executionId) {
+          await persistNodeState(options.executionId, node.taskId, "FAILED", { error: node.error, retryCount: node.retryCount });
+        }
         return;
       }
 
@@ -316,6 +409,10 @@ export async function executeTaskGraph(
       if (!approvalVerdict.approved && approvalVerdict.status === "ESCALATE") {
         node.error = approvalVerdict.reason;
         transitionNode(node, "FAILED", "FAILED", approvalVerdict.reason);
+        if (options.executionId) {
+          await persistNodeState(options.executionId, node.taskId, "FAILED", { error: node.error, retryCount: node.retryCount });
+          await transitionExecution(options.executionId, "ESCALATED", { nodeId: node.taskId, reason: approvalVerdict.reason });
+        }
         return;
       }
 
@@ -326,6 +423,10 @@ export async function executeTaskGraph(
         // Stage 5: EXECUTE
         transitionNode(node, "RUNNING", "EXECUTE", `Commencing execution cycle ${node.revisionCount}`);
         const executionAttemptStartTime = Date.now();
+
+        if (options.executionId) {
+          attemptId = await beginExecutionAttempt(options.executionId, node.taskId);
+        }
 
         // Transactional Pre-Modification File Snapshots
         const targetFiles = extractTargetFilesFromNode(node);
@@ -361,6 +462,20 @@ export async function executeTaskGraph(
               isSandboxed: true,
             },
           );
+
+          if (options.executionId) {
+            await persistToolExecution(options.executionId, {
+              actionId,
+              nodeId: node.taskId,
+              toolId,
+              toolName: toolId,
+              input: toolArgs,
+              output: toolExec.output,
+              success: toolExec.success,
+              error: toolExec.error,
+              executionTimeMs: toolExec.executionTimeMs,
+            });
+          }
 
           const toolObs: StructuredObservation = toolExec.observation || {
             action: toolId,
@@ -436,6 +551,25 @@ export async function executeTaskGraph(
               clearTimeout(timeoutTimer);
             }
           }
+
+          if (options.executionId && rawResponse) {
+            const obsList = rawResponse.observations || (rawResponse.observation ? [rawResponse.observation] : []);
+            for (const o of obsList) {
+              if (o.tool || o.action?.startsWith("tool_")) {
+                await persistToolExecution(options.executionId, {
+                  actionId,
+                  nodeId: node.taskId,
+                  toolId: o.tool || o.action,
+                  toolName: o.tool || o.action,
+                  input: o.inputs,
+                  output: o.stdout || o.after || o.output,
+                  success: o.success,
+                  error: o.error || o.stderr,
+                  executionTimeMs: o.durationMs,
+                });
+              }
+            }
+          }
         }
 
         const response: StructuredAgentResponse = {
@@ -475,6 +609,19 @@ export async function executeTaskGraph(
           });
         }
 
+        if (options.executionId) {
+          for (const obs of node.observations) {
+            lastObservationId = await recordObservation(options.executionId, {
+              source: obs.tool || obs.action || node.assignedAgentRole,
+              nodeId: node.taskId,
+              actionId,
+              success: obs.success,
+              data: obs,
+            });
+          }
+          await transitionExecution(options.executionId, "OBSERVED", { nodeId: node.taskId });
+        }
+
         node.completedAt = new Date().toISOString();
         node.result = response.result;
         node.confidence = response.confidence;
@@ -507,17 +654,74 @@ export async function executeTaskGraph(
         trace.failureReasons = evalRes.failureReasons;
         trace.evaluationResult = evalRes;
 
+        if (options.executionId) {
+          await recordEvaluation(options.executionId, {
+            nodeId: node.taskId,
+            verdict: evalRes.verdict,
+            score: evalRes.overallScore,
+            reasons: evalRes.failureReasons,
+            evidence: evalRes,
+          });
+          await transitionExecution(options.executionId, "EVALUATED", { nodeId: node.taskId, verdict: evalRes.verdict });
+        }
+
         // Stage 8: DECISION & RECOVERY
         if (evalRes.verdict === "PASS") {
           globalRecoveryController.clearSnapshots(node.taskId);
           transitionNode(node, "SUCCESS", "COMPLETE", "Evaluation passed successfully");
+          if (options.executionId) {
+            if (recoveryId) await updateRecovery(recoveryId, "SUCCEEDED", lastObservationId);
+            if (attemptId) await completeExecutionAttempt(attemptId, "SUCCEEDED");
+            await persistNodeState(options.executionId, node.taskId, "SUCCESS", {
+              output: { result: node.result },
+              retryCount: node.retryCount,
+            });
+          }
           executionSuccess = true;
+
+          if (options.interruptAfterNodeId === node.taskId) {
+            throw new InterruptedExecutionError(options.executionId || "exec_interrupted", node.taskId);
+          }
         } else if (evalRes.verdict === "PARTIAL") {
           globalRecoveryController.clearSnapshots(node.taskId);
           transitionNode(node, "PARTIAL", "COMPLETE", "Evaluation accepted partial output");
+          if (options.executionId) {
+            if (recoveryId) await updateRecovery(recoveryId, "SUCCEEDED", lastObservationId);
+            if (attemptId) await completeExecutionAttempt(attemptId, "SUCCEEDED");
+            await persistNodeState(options.executionId, node.taskId, "PARTIAL", {
+              output: { result: node.result },
+              retryCount: node.retryCount,
+            });
+          }
           executionSuccess = true;
+
+          if (options.interruptAfterNodeId === node.taskId) {
+            throw new InterruptedExecutionError(options.executionId || "exec_interrupted", node.taskId);
+          }
         } else if (evalRes.verdict === "REVISE") {
           transitionNode(node, "RUNNING", "RECOVER", `Evaluation requested revision: ${evalRes.failureReasons.join("; ")}`);
+
+          if (options.executionId) {
+            if (attemptId) await completeExecutionAttempt(attemptId, "FAILED", evalRes.failureReasons.join("; "));
+            await persistNodeState(options.executionId, node.taskId, "FAILED", {
+              error: evalRes.failureReasons.join("; "),
+              retryCount: node.retryCount,
+            });
+            const failureClass = globalRecoveryController.classifyFailure(evalRes.failureReasons.join("; "));
+            recoveryId = await recordRecovery(options.executionId, {
+              nodeId: node.taskId,
+              attemptNumber: node.retryCount + 1,
+              classification: failureClass,
+              action: "Task revision loop",
+              status: "RETRYING",
+              observationId: lastObservationId,
+            });
+            await transitionExecution(options.executionId, "RECOVERING", {
+              nodeId: node.taskId,
+              failureClass,
+              attempt: node.retryCount + 1,
+            });
+          }
 
           // Record self-healing lesson memory
           try {
@@ -548,6 +752,10 @@ export async function executeTaskGraph(
               }
             }
 
+            if (node.inputs?.retryToolArgs) {
+              node.inputs.args = node.inputs.retryToolArgs;
+            }
+
             // Build self-correction feedback prompt for next cycle
             currentObjective = `[REVISION CYCLE ${node.revisionCount} / ${node.maxRevisionCycles}]
 Original Task: ${node.description}
@@ -563,6 +771,11 @@ Please revise and improve your output to strictly address these corrections.`;
             const rollbackRes = globalRecoveryController.rollbackTaskModifications(node.taskId);
             trace.targetFiles = modifiedFiles;
             transitionNode(node, "FAILED", "FAILED", node.error);
+            if (options.executionId) {
+              if (recoveryId) await updateRecovery(recoveryId, "FAILED");
+              await persistNodeState(options.executionId, node.taskId, "FAILED", { error: node.error, retryCount: node.retryCount });
+              await transitionExecution(options.executionId, "ESCALATED", { nodeId: node.taskId, error: node.error });
+            }
             executionSuccess = true;
           }
         } else {
@@ -594,8 +807,37 @@ Please revise and improve your output to strictly address these corrections.`;
             timestamp: new Date().toISOString(),
           });
 
+          if (options.executionId) {
+            if (attemptId) await completeExecutionAttempt(attemptId, "FAILED", evalRes.failureReasons.join("; "));
+            await persistNodeState(options.executionId, node.taskId, "FAILED", {
+              error: evalRes.failureReasons.join("; "),
+              retryCount: node.retryCount,
+            });
+            recoveryId = await recordRecovery(options.executionId, {
+              nodeId: node.taskId,
+              attemptNumber: node.retryCount + 1,
+              classification: failureClass,
+              action: "Adaptive recovery and retry",
+              status: node.retryCount < node.maxRetries ? "RETRYING" : "FAILED",
+              observationId: lastObservationId,
+            });
+            await transitionExecution(options.executionId, "RECOVERING", {
+              nodeId: node.taskId,
+              failureClass,
+              attempt: node.retryCount + 1,
+            });
+          }
+
           if (node.retryCount < node.maxRetries) {
             node.retryCount += 1;
+            if (typeof node.inputs?.repairHook === "function") {
+              try {
+                await node.inputs.repairHook(node, evalRes, context);
+              } catch (_repHookErr) {}
+            }
+            if (node.inputs?.retryToolArgs) {
+              node.inputs.args = node.inputs.retryToolArgs;
+            }
             transitionNode(node, "READY", "PLAN", `Retrying node (${node.retryCount}/${node.maxRetries})`);
             return;
           } else {
@@ -604,11 +846,19 @@ Please revise and improve your output to strictly address these corrections.`;
               ? `Exceeded maximum revision cycles (${node.maxRevisionCycles}). Escalating task failure: ${evalRes.failureReasons.join("; ")}`
               : evalRes.failureReasons.join("; ") || "Task failed evaluation";
             transitionNode(node, "FAILED", "FAILED", node.error);
+            if (options.executionId) {
+              if (recoveryId) await updateRecovery(recoveryId, "FAILED");
+              await persistNodeState(options.executionId, node.taskId, "FAILED", { error: node.error, retryCount: node.retryCount });
+              await transitionExecution(options.executionId, "ESCALATED", { nodeId: node.taskId, error: node.error });
+            }
             executionSuccess = true;
           }
         }
       }
     } catch (err: any) {
+      if (err instanceof InterruptedExecutionError || (err as any)?.name === "InterruptedExecutionError") {
+        throw err;
+      }
       const isTimeout = err.message?.includes("timed out");
       const errMessage = err.message || "Execution error";
       node.error = errMessage;
@@ -617,6 +867,26 @@ Please revise and improve your output to strictly address these corrections.`;
       const failureClass = globalRecoveryController.classifyFailure(errMessage);
       const modifiedFiles = globalRecoveryController.getSnapshottedFiles(node.taskId);
       let rolledBack = false;
+
+      if (options.executionId) {
+        if (attemptId) await completeExecutionAttempt(attemptId, "FAILED", errMessage);
+        await persistNodeState(options.executionId, node.taskId, isTimeout ? "TIMEOUT" : "FAILED", {
+          error: errMessage,
+          retryCount: node.retryCount,
+        });
+        await recordRecovery(options.executionId, {
+          nodeId: node.taskId,
+          attemptNumber: node.retryCount + 1,
+          classification: failureClass,
+          action: "Exception recovery handler",
+          status: node.retryCount < node.maxRetries ? "RETRYING" : "FAILED",
+          observationId: lastObservationId,
+        });
+        await transitionExecution(options.executionId, "RECOVERING", {
+          nodeId: node.taskId,
+          failureClass,
+        });
+      }
 
       if (node.retryCount < node.maxRetries) {
         node.retryCount += 1;
