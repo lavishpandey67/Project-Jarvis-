@@ -177,6 +177,147 @@ if (process.env.DATABASE_URL) {
       risk_level TEXT NOT NULL DEFAULT 'low',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_journals (
+      execution_id TEXT PRIMARY KEY,
+      request_id TEXT NOT NULL,
+      conversation_id INT,
+      objective TEXT NOT NULL,
+      state TEXT NOT NULL,
+      graph_id TEXT,
+      current_node_id TEXT,
+      final_output TEXT,
+      failure TEXT,
+      resume_count INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_graphs (
+      graph_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      objective TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_states (
+      state_record_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      is_current INT NOT NULL DEFAULT 1,
+      entered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      exited_at TIMESTAMPTZ
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_graph_nodes (
+      node_record_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      graph_id TEXT NOT NULL,
+      node_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      assigned_agent_role TEXT,
+      assigned_agent_name TEXT,
+      dependencies TEXT,
+      input TEXT,
+      output TEXT,
+      error TEXT,
+      retry_count INT NOT NULL DEFAULT 0,
+      max_retries INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS jarvis_execution_graph_nodes_execution_node_idx
+      ON jarvis_execution_graph_nodes (execution_id, node_id);
+    CREATE TABLE IF NOT EXISTS jarvis_execution_events (
+      event_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      sequence INT NOT NULL,
+      kind TEXT NOT NULL,
+      from_state TEXT,
+      to_state TEXT,
+      node_id TEXT,
+      payload TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS jarvis_execution_events_execution_sequence_idx
+      ON jarvis_execution_events (execution_id, sequence);
+    CREATE TABLE IF NOT EXISTS jarvis_execution_actions (
+      action_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      node_id TEXT,
+      action_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      input TEXT,
+      authorized_by TEXT,
+      authorized_at TIMESTAMPTZ,
+      executed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_tool_executions (
+      tool_execution_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      action_id TEXT,
+      node_id TEXT,
+      tool_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      input TEXT,
+      output TEXT,
+      success INT NOT NULL DEFAULT 1,
+      error TEXT,
+      execution_time_ms INT NOT NULL DEFAULT 0,
+      started_at TIMESTAMPTZ,
+      ended_at TIMESTAMPTZ
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_attempts (
+      attempt_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      node_id TEXT,
+      attempt_number INT NOT NULL,
+      status TEXT NOT NULL,
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ended_at TIMESTAMPTZ,
+      error TEXT
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_observations (
+      observation_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      action_id TEXT,
+      node_id TEXT,
+      source TEXT NOT NULL,
+      success INT NOT NULL DEFAULT 1,
+      data TEXT,
+      observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_evaluations (
+      evaluation_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      node_id TEXT,
+      verdict TEXT NOT NULL,
+      score TEXT,
+      reasons TEXT,
+      evidence TEXT,
+      evaluated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_recoveries (
+      recovery_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      node_id TEXT,
+      attempt_number INT NOT NULL,
+      classification TEXT NOT NULL,
+      action TEXT NOT NULL,
+      status TEXT NOT NULL,
+      observation_id TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS jarvis_execution_lessons (
+      lesson_id TEXT PRIMARY KEY,
+      execution_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      retrieval_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
 }
 

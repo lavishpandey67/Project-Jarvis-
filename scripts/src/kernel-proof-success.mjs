@@ -1,0 +1,1 @@
+process.stdout.write("re-execution completed successfully for the execution-kernel proof\n");

@@ -31,6 +31,17 @@ import {
   PythonIntelligenceClient,
   processWithJarvisBrain,
 } from "./jarvis";
+import {
+  authorizeExecution,
+  beginExecutionAttempt,
+  completeExecutionAttempt,
+  failExecution,
+  finalizeExecution,
+  getExecutionTrace,
+  listRelevantLessons,
+  startOrResumeExecution,
+  transitionExecution,
+} from "./jarvis/executionKernel";
 
 const agentSeeds = [
   {
@@ -367,10 +378,25 @@ export async function getSummary() {
   });
 }
 
-export async function respondWithCompanion(body: unknown) {
+export async function respondWithCompanion(
+  body: unknown,
+  options?: { executionId?: string },
+) {
   const parsed = RespondWithCompanionBody.parse(body);
   const conversation = await getConversation(parsed.conversationId);
   if (!conversation) throw new Error("Conversation not found.");
+
+  const executionId =
+    options?.executionId ??
+    `exec_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  await startOrResumeExecution({
+    executionId,
+    requestId: `companion_${parsed.conversationId}_${Date.now()}`,
+    conversationId: parsed.conversationId,
+    objective: parsed.message,
+  });
+  await authorizeExecution(executionId);
+  const priorLessons = await listRelevantLessons(parsed.message);
 
   const [memoryRows, agentRows, recentMessages, activeTasks] = await Promise.all([
     db.select().from(memoriesTable).orderBy(desc(memoriesTable.importance)).limit(8),
@@ -400,6 +426,13 @@ export async function respondWithCompanion(body: unknown) {
     recentMessages: recentMessages.map((m: any) => ({ role: m.role, content: m.content })),
     activeTasks: activeTasks.map((t: any) => ({ id: t.id, title: t.title, status: t.status })),
   });
+  scopedPackage.relevantMemories.push(
+    ...priorLessons.map((lesson: any) => ({
+      title: lesson.title,
+      content: lesson.content,
+      importance: 4,
+    })),
+  );
 
   await recordActivity(
     "rag_retrieval",
@@ -427,7 +460,25 @@ export async function respondWithCompanion(body: unknown) {
   };
 
   // Run Jarvis Brain Orchestration
-  const jarvisResult = await processWithJarvisBrain(parsed.message, rawWorkspaceData, modelCallerFn);
+  await transitionExecution(executionId, "EXECUTED", {
+    engine: "existing-jarvis-dag-runner",
+    provider: modelCallerFn ? "configured-provider" : "deterministic-fallback",
+  });
+  const attemptId = await beginExecutionAttempt(executionId);
+  let jarvisResult;
+  try {
+    jarvisResult = await processWithJarvisBrain(parsed.message, rawWorkspaceData, modelCallerFn);
+    await completeExecutionAttempt(attemptId, "SUCCEEDED");
+    await finalizeExecution(executionId, jarvisResult);
+  } catch (error) {
+    await completeExecutionAttempt(
+      attemptId,
+      "FAILED",
+      error instanceof Error ? error.message : String(error),
+    );
+    await failExecution(executionId, error);
+    throw error;
+  }
 
   await recordActivity(
     "intent_analyzed",
@@ -555,6 +606,7 @@ export async function respondWithCompanion(body: unknown) {
 
   await recordActivity("response_ready", "Jarvis Brain response ready.");
 
+  const trace = await getExecutionTrace(executionId);
   return RespondWithCompanionResponse.parse({
     conversationId: parsed.conversationId,
     userMessage,
@@ -563,5 +615,29 @@ export async function respondWithCompanion(body: unknown) {
     agent: agentRecord ?? undefined,
     task: taskRecord ? { ...taskRecord, status: "completed" } : undefined,
     reviewed: Boolean(agentRecord),
+    executionId,
+    executionState: trace.journal?.state ?? "COMPLETED",
+    trace,
   });
+}
+
+export async function getDurableExecutionTrace(executionId: string) {
+  const trace = await getExecutionTrace(executionId);
+  if (!trace.journal) throw new Error("Execution not found.");
+  return trace;
+}
+
+export async function resumeCompanionExecution(executionId: string) {
+  const trace = await getDurableExecutionTrace(executionId);
+  const journal = trace.journal as { state?: string; conversationId?: number; objective?: string };
+  if (["COMPLETED", "FAILED", "ESCALATED"].includes(String(journal.state))) {
+    throw new Error(`Execution is already terminal in state '${journal.state}'.`);
+  }
+  if (!journal.conversationId || !journal.objective) {
+    throw new Error("Execution cannot be resumed because its input is incomplete.");
+  }
+  return respondWithCompanion(
+    { conversationId: journal.conversationId, message: journal.objective },
+    { executionId },
+  );
 }

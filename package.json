@@ -8,11 +8,11 @@
     "scripts"
   ],
   "scripts": {
-    "dev": "npx pnpm --filter @workspace/personal-ai-workforce run build && npx pnpm --filter @workspace/api-server run dev",
-    "start": "npx pnpm --filter @workspace/api-server run start",
-    "build": "npx pnpm run typecheck && npx pnpm -r --if-present run build",
+    "dev": "pnpm --filter @workspace/personal-ai-workforce run build && pnpm --filter @workspace/api-server run dev",
+    "start": "pnpm --filter @workspace/api-server run start",
+    "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
-    "typecheck": "npx pnpm run typecheck:libs && npx pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
   "dependencies": {

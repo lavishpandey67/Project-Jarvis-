@@ -58,6 +58,44 @@ paths:
           description: Invalid request
         "500":
           description: Companion unavailable
+  /executions/{executionId}:
+    get:
+      operationId: getExecutionTrace
+      tags: [companion]
+      summary: Get a durable Companion execution trace
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Durable execution trace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecutionTrace"
+        "404":
+          description: Execution not found
+  /executions/{executionId}/resume:
+    post:
+      operationId: resumeExecution
+      tags: [companion]
+      summary: Resume a non-terminal durable execution
+      parameters:
+        - name: executionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Resumed Companion response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionResponse"
+        "404":
+          description: Execution not found
   /conversations:
     get:
       operationId: listConversations
@@ -394,7 +432,7 @@ components:
         message: { type: string, minLength: 1 }
     CompanionResponse:
       type: object
-      required: [conversationId, userMessage, companionMessage, delegated, reviewed]
+      required: [conversationId, userMessage, companionMessage, delegated, reviewed, executionId, executionState, trace]
       properties:
         conversationId: { type: number }
         userMessage:
@@ -407,6 +445,26 @@ components:
         task:
           $ref: "#/components/schemas/Task"
         reviewed: { type: boolean }
+        executionId: { type: string }
+        executionState:
+          type: string
+          enum: [PROPOSED, AUTHORIZED, EXECUTED, OBSERVED, EVALUATED, COMPLETED, FAILED, RECOVERING, ESCALATED]
+        trace:
+          $ref: "#/components/schemas/ExecutionTrace"
+    ExecutionTrace:
+      type: object
+      required: [journal, graphs, graph, events, actions, attempts, observations, evaluations, recoveries, lessons]
+      properties:
+        journal: { type: [object, "null"], additionalProperties: true }
+        graphs: { type: array, items: { type: object, additionalProperties: true } }
+        graph: { type: array, items: { type: object, additionalProperties: true } }
+        events: { type: array, items: { type: object, additionalProperties: true } }
+        actions: { type: array, items: { type: object, additionalProperties: true } }
+        attempts: { type: array, items: { type: object, additionalProperties: true } }
+        observations: { type: array, items: { type: object, additionalProperties: true } }
+        evaluations: { type: array, items: { type: object, additionalProperties: true } }
+        recoveries: { type: array, items: { type: object, additionalProperties: true } }
+        lessons: { type: array, items: { type: object, additionalProperties: true } }
     WorkforceSummary:
       type: object
       required: [conversationCount, memoryCount, openTaskCount, activityCount]

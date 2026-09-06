@@ -20,7 +20,9 @@ import {
   listMemories,
   listMessages,
   listTasks,
+  getDurableExecutionTrace,
   respondWithCompanion,
+  resumeCompanionExecution,
   updateMemory,
   updateTask,
 } from "../lib/workforce";
@@ -37,6 +39,20 @@ router.post("/companion/respond", async (req, res): Promise<void> => {
   } catch (error) {
     req.log.error({ err: error }, "Companion request failed");
     res.status(400).json({ error: error instanceof Error ? error.message : "Companion request failed" });
+  }
+});
+router.get("/executions/:executionId", async (req, res): Promise<void> => {
+  try {
+    res.json(await getDurableExecutionTrace(req.params.executionId));
+  } catch (error) {
+    res.status(404).json({ error: error instanceof Error ? error.message : "Execution not found" });
+  }
+});
+router.post("/executions/:executionId/resume", async (req, res): Promise<void> => {
+  try {
+    res.json(await resumeCompanionExecution(req.params.executionId));
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Execution could not be resumed" });
   }
 });
 
