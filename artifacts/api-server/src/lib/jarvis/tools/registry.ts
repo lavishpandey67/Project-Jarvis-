@@ -14,6 +14,78 @@ import {
 import { CognitiveMemoryStore } from "../memory/store";
 import { globalRecoveryController } from "../recoveryController";
 
+const SYSTEM_ROOT_PREFIXES = [
+  "/tmp",
+  "/etc",
+  "/var",
+  "/usr",
+  "/bin",
+  "/sbin",
+  "/opt",
+  "/home",
+  "/root",
+  "/proc",
+  "/sys",
+  "/dev",
+];
+
+export function resolveSafeWorkspacePath(workspaceRoot: string, rawPath: string): {
+  resolvedPath: string;
+  isSafe: boolean;
+  error?: string;
+} {
+  const trimmed = (rawPath || "").trim();
+  if (!trimmed) {
+    return { resolvedPath: "", isSafe: false, error: "Empty path provided." };
+  }
+
+  // Traversal check
+  if (trimmed.includes("..")) {
+    const resolvedAttempt = path.resolve(workspaceRoot, trimmed);
+    if (!resolvedAttempt.startsWith(workspaceRoot) || resolvedAttempt === workspaceRoot) {
+      return {
+        resolvedPath: resolvedAttempt,
+        isSafe: false,
+        error: `Security Policy Violation: Target path '${trimmed}' attempts directory traversal outside workspace boundary.`,
+      };
+    }
+  }
+
+  // Check if it starts with an explicit system root directory outside workspace
+  const normalizedLower = trimmed.toLowerCase();
+  for (const sysPrefix of SYSTEM_ROOT_PREFIXES) {
+    if (normalizedLower === sysPrefix || normalizedLower.startsWith(sysPrefix + "/") || normalizedLower.startsWith(sysPrefix + "\\")) {
+      const resolvedSys = path.resolve(trimmed);
+      if (!resolvedSys.startsWith(workspaceRoot) || resolvedSys === workspaceRoot) {
+        return {
+          resolvedPath: resolvedSys,
+          isSafe: false,
+          error: `Security Policy Violation: Access to system directory '${trimmed}' is outside workspace boundary.`,
+        };
+      }
+    }
+  }
+
+  let resolvedPath: string;
+  if (trimmed.startsWith(workspaceRoot)) {
+    resolvedPath = trimmed;
+  } else if (trimmed.startsWith("/") || trimmed.startsWith("\\")) {
+    resolvedPath = path.resolve(workspaceRoot, trimmed.replace(/^[/\\]+/, ""));
+  } else {
+    resolvedPath = path.resolve(workspaceRoot, trimmed);
+  }
+
+  if (!resolvedPath.startsWith(workspaceRoot) || resolvedPath === workspaceRoot) {
+    return {
+      resolvedPath,
+      isSafe: false,
+      error: `Security Policy Violation: Target path '${trimmed}' is outside workspace boundary.`,
+    };
+  }
+
+  return { resolvedPath, isSafe: true };
+}
+
 export class InternalToolRegistry {
   private tools: Map<string, ToolDefinition> = new Map();
   private memoryStore?: CognitiveMemoryStore;
@@ -316,16 +388,15 @@ export class InternalToolRegistry {
           };
         }
 
-        const resolvedPath = path.resolve(workspaceRoot, rawPath);
-
-        // Security Policy Check: Sandboxed strictly within workspace root
-        if (!resolvedPath.startsWith(workspaceRoot)) {
+        const pathCheck = resolveSafeWorkspacePath(workspaceRoot, rawPath);
+        if (!pathCheck.isSafe) {
           return {
             success: false,
-            error: `Security Policy Violation: Access to path '${rawPath}' is outside workspace boundary.`,
+            error: pathCheck.error || `Security Policy Violation: Access to path '${rawPath}' is outside workspace boundary.`,
             logs: [`Security policy denied access to path outside workspace: '${rawPath}'`],
           };
         }
+        const resolvedPath = pathCheck.resolvedPath;
 
         try {
           const stat = await fs.stat(resolvedPath);
@@ -427,16 +498,15 @@ export class InternalToolRegistry {
           };
         }
 
-        const resolvedPath = path.resolve(workspaceRoot, rawPath);
-
-        // Security Policy Check 1: Sandboxed strictly within workspace root
-        if (!resolvedPath.startsWith(workspaceRoot) || resolvedPath === workspaceRoot) {
+        const pathCheck = resolveSafeWorkspacePath(workspaceRoot, rawPath);
+        if (!pathCheck.isSafe) {
           return {
             success: false,
-            error: `Security Policy Violation: Target path '${rawPath}' is outside workspace boundary.`,
+            error: pathCheck.error || `Security Policy Violation: Target path '${rawPath}' is outside workspace boundary.`,
             logs: [`Security policy denied write to path outside workspace: '${rawPath}'`],
           };
         }
+        const resolvedPath = pathCheck.resolvedPath;
 
         // Security Policy Check 2: Symlink escape containment check on existing ancestors
         try {
@@ -619,26 +689,15 @@ export class InternalToolRegistry {
           };
         }
 
-        // Security Check 1: Traversal Prevention
-        if (rawPath.includes("..") || rawPath.startsWith("/") || rawPath.startsWith("\\")) {
-          const resolvedAttempt = path.resolve(workspaceRoot, rawPath);
-          if (!resolvedAttempt.startsWith(workspaceRoot) || resolvedAttempt === workspaceRoot) {
-            return {
-              success: false,
-              error: "Security Policy Violation: Target path is outside workspace boundary.",
-              logs: [`Security policy denied patch operation for path: '${rawPath}'`],
-            };
-          }
-        }
-
-        const resolvedPath = path.resolve(workspaceRoot, rawPath);
-        if (!resolvedPath.startsWith(workspaceRoot) || resolvedPath === workspaceRoot) {
+        const pathCheck = resolveSafeWorkspacePath(workspaceRoot, rawPath);
+        if (!pathCheck.isSafe) {
           return {
             success: false,
-            error: "Security Policy Violation: Target path is outside workspace boundary.",
+            error: pathCheck.error || "Security Policy Violation: Target path is outside workspace boundary.",
             logs: [`Security policy denied patch operation for path: '${rawPath}'`],
           };
         }
+        const resolvedPath = pathCheck.resolvedPath;
 
         // Check target file existence
         try {
@@ -803,11 +862,11 @@ export class InternalToolRegistry {
 
         // Security Policy Check 3: Workspace containment check on targetPath if provided
         if (rawTargetPath) {
-          const resolvedTargetPath = path.resolve(workspaceRoot, rawTargetPath);
-          if (!resolvedTargetPath.startsWith(workspaceRoot) || resolvedTargetPath === workspaceRoot) {
+          const targetCheck = resolveSafeWorkspacePath(workspaceRoot, rawTargetPath);
+          if (!targetCheck.isSafe) {
             return {
               success: false,
-              error: `Security Policy Violation: Target test path '${rawTargetPath}' is outside workspace boundary.`,
+              error: targetCheck.error || `Security Policy Violation: Target test path '${rawTargetPath}' is outside workspace boundary.`,
               logs: [`Security policy denied test execution for path outside workspace: '${rawTargetPath}'`],
             };
           }
@@ -958,20 +1017,16 @@ export class InternalToolRegistry {
         }
 
         return {
-          success: true,
+          success: false,
+          error: "Web search provider unavailable: TAVILY_API_KEY is not configured or network search is offline.",
           output: {
             query: input.query,
-            results: [
-              {
-                title: `Web Intelligence Search for "${input.query}"`,
-                url: `https://duckduckgo.com/?q=${encodeURIComponent(input.query)}`,
-                snippet: `External world knowledge reference query for "${input.query}". Provider operating in clean sandbox mode.`,
-                provenance: "WORLD_KNOWLEDGE",
-              },
-            ],
+            results: [],
+            degraded: true,
+            providerStatus: "UNAVAILABLE",
             provenance: "WORLD_KNOWLEDGE",
           },
-          logs: [`Executed provider-agnostic web search for '${input.query}'`],
+          logs: [`Web search provider unavailable for query '${input.query}'`],
           executionTimeMs: 0,
         };
       },
@@ -1021,13 +1076,16 @@ export class InternalToolRegistry {
         }
 
         return {
-          success: true,
+          success: false,
+          error: `Web fetch failed for '${input.url}': network fetch unavailable or URL unreachable.`,
           output: {
             url: input.url,
-            content: `Content from ${input.url} could not be fetched directly. Web page fetcher fallback active.`,
+            content: "",
+            degraded: true,
+            providerStatus: "UNAVAILABLE",
             provenance: "WORLD_KNOWLEDGE",
           },
-          logs: [`Web page fetcher executed fallback for '${input.url}'`],
+          logs: [`Web page fetcher unavailable for '${input.url}'`],
           executionTimeMs: 0,
         };
       },

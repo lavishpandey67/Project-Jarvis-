@@ -1,4 +1,4 @@
-import { TaskGraph, TaskGraphNode, DAGExecutionResult } from "../dag/types";
+import { TaskGraph, TaskGraphNode, DAGExecutionResult, StructuredObservation } from "../dag/types";
 import { ScopedContext } from "../types";
 import { runCriticGate } from "./criticGate";
 import { EvaluationResult, GraphEvaluationResult, EvaluationVerdict } from "./types";
@@ -7,10 +7,16 @@ export function evaluateTaskResult(
   node: TaskGraphNode,
   agentOutput: string,
   context: ScopedContext,
+  observations?: StructuredObservation[],
 ): EvaluationResult {
   const evaluatedAt = new Date().toISOString();
   const failureReasons: string[] = [];
   const requiredCorrections: string[] = [];
+
+  const allObservations: StructuredObservation[] = [
+    ...(node.observations || []),
+    ...(observations || []),
+  ];
 
   // 1. Schema Score
   let schemaScore = 1.0;
@@ -51,23 +57,66 @@ export function evaluateTaskResult(
   failureReasons.push(...criticRes.failureReasons, ...criticRes.contradictionsFound);
   requiredCorrections.push(...criticRes.suggestedCorrections);
 
-  // 5. Constraint Score
+  // 5. Tool Observation Evaluation (Requirement 2, 3, 5)
+  let observationScore = 1.0;
+  if (allObservations.length > 0) {
+    // For evaluating current state in multi-cycle revision loops, evaluate latest observation per unique action/tool/target
+    const latestObservationsMap = new Map<string, StructuredObservation>();
+    for (const obs of allObservations) {
+      const key = `${obs.action}_${obs.tool || ""}_${obs.target || ""}`;
+      latestObservationsMap.set(key, obs);
+    }
+    const currentCycleObservations = Array.from(latestObservationsMap.values());
+
+    let failedToolsCount = 0;
+    let successfulToolsCount = 0;
+
+    for (const obs of currentCycleObservations) {
+      if (!obs.success) {
+        failedToolsCount++;
+        const failureDetail = obs.stderr || obs.error || obs.status || "Tool execution failed";
+        failureReasons.push(
+          `Concrete tool execution failed for '${obs.tool || obs.action}' (status: ${obs.status}${obs.exitCode !== undefined ? `, exit code: ${obs.exitCode}` : ""}): ${failureDetail}`
+        );
+        requiredCorrections.push(`Resolve failure in '${obs.tool || obs.action}': ${failureDetail}`);
+      } else {
+        successfulToolsCount++;
+      }
+
+      if (obs.degraded || obs.status === "UNAVAILABLE") {
+        failureReasons.push(`Required provider unavailable: ${obs.error || "Service unavailable"}`);
+        requiredCorrections.push("Retry operation when provider service is restored.");
+      }
+    }
+
+    if (failedToolsCount > 0) {
+      observationScore = Math.max(0.0, 1.0 - (failedToolsCount / currentCycleObservations.length));
+      groundingScore = Math.min(groundingScore, 0.3);
+    } else if (successfulToolsCount > 0) {
+      observationScore = 1.0;
+      groundingScore = Math.max(groundingScore, 0.95);
+      goalScore = Math.max(goalScore, 0.9);
+    }
+  }
+
+  // 6. Constraint Score
   let constraintScore = 1.0;
   if (criticRes.contradictionsFound.length > 0) {
     constraintScore = Math.max(0.1, 1.0 - criticRes.contradictionsFound.length * 0.3);
   }
 
-  // 6. Confidence Score
+  // 7. Confidence Score
   const confidenceScore = node.confidence ?? 0.8;
 
   // Weighted Overall Score
   const overallScore = Number(
     (
-      schemaScore * 0.15 +
-      goalScore * 0.25 +
-      constraintScore * 0.2 +
+      schemaScore * 0.10 +
+      goalScore * 0.20 +
+      constraintScore * 0.20 +
       groundingScore * 0.15 +
-      criticScore * 0.25
+      criticScore * 0.20 +
+      observationScore * 0.15
     ).toFixed(2),
   );
 
@@ -81,13 +130,11 @@ export function evaluateTaskResult(
   } else if (currentRevisions < maxRevisions) {
     verdict = "REVISE";
   } else if (failureReasons.length > 0) {
-    verdict = failureReasons.some((f) => f.includes("Exceeded") || f.includes("Violates") || f.includes("constraint"))
+    verdict = failureReasons.some((f) => f.includes("Exceeded") || f.includes("Violates") || f.includes("constraint") || f.includes("Safety Violation"))
       ? "ESCALATE"
       : "FAIL";
   } else if (overallScore >= 0.5) {
     verdict = "PARTIAL";
-  } else {
-    verdict = "FAIL";
   }
 
   return {

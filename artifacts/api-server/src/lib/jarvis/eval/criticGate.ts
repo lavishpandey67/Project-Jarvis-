@@ -71,7 +71,10 @@ export function runCriticGate(
       suggestedCorrections.push("Include explicit trade-offs and prioritized action steps.");
     }
   } else if (node.assignedAgentRole === "builder") {
-    if (!lower.includes("code") && !lower.includes("function") && !lower.includes("class") && !lower.includes("interface") && !lower.includes("import") && !lower.includes("const")) {
+    const hasVerifiedToolWrite = node.observations?.some(
+      (obs) => (obs.action === "tool_file_write" || obs.action === "tool_file_patch" || obs.tool === "tool_file_write" || obs.tool === "tool_file_patch") && obs.success,
+    );
+    if (!hasVerifiedToolWrite && !lower.includes("code") && !lower.includes("function") && !lower.includes("class") && !lower.includes("interface") && !lower.includes("import") && !lower.includes("const") && !lower.includes("tool_file_write") && !lower.includes("sha256")) {
       failureReasons.push("Builder output does not contain structured technical code or interface definitions.");
       suggestedCorrections.push("Provide explicit technical code implementation.");
     }

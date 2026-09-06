@@ -12,6 +12,54 @@ export type TaskStatus =
   | "CANCELLED"
   | "TIMEOUT";
 
+export type KernelLifecycleStage =
+  | "OBJECTIVE"
+  | "UNDERSTAND"
+  | "PLAN"
+  | "AUTHORIZE"
+  | "EXECUTE"
+  | "OBSERVE"
+  | "EVALUATE"
+  | "RECOVER"
+  | "COMPLETE"
+  | "FAILED";
+
+export interface StructuredObservation {
+  action: string;
+  tool?: string;
+  inputs?: Record<string, any>;
+  target?: string;
+  success: boolean;
+  status: string;
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  before?: {
+    sizeBytes?: number;
+    hash?: string | null;
+    content?: string;
+  };
+  after?: {
+    sizeBytes?: number;
+    hash?: string;
+    content?: string;
+  };
+  error?: string;
+  timestamp: string;
+  durationMs?: number;
+  degraded?: boolean;
+  metadata?: Record<string, any>;
+}
+
+export interface NodeTransitionRecord {
+  fromStatus: TaskStatus;
+  toStatus: TaskStatus;
+  fromStage?: KernelLifecycleStage;
+  toStage: KernelLifecycleStage;
+  timestamp: string;
+  reason?: string;
+}
+
 export interface TaskGraphNode {
   taskId: string;
   graphId: string;
@@ -24,6 +72,15 @@ export interface TaskGraphNode {
   expectedOutputs?: string;
   constraints: string[];
   status: TaskStatus;
+  stage?: KernelLifecycleStage;
+  observations?: StructuredObservation[];
+  transitionHistory?: NodeTransitionRecord[];
+  authorizationVerdict?: {
+    approved: boolean;
+    status: "APPROVED" | "ESCALATE" | "REJECTED";
+    reason: string;
+  };
+  recoveryHistory?: any[];
   allowPartialDependency?: boolean; // If true, can run even if a dependency is PARTIAL
   retryCount: number;
   maxRetries: number;
@@ -47,6 +104,13 @@ export interface TaskGraph {
   nodes: TaskGraphNode[];
   createdAt: string;
   status: "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "PARTIAL";
+  stage?: KernelLifecycleStage;
+  transitionHistory?: Array<{
+    stage: KernelLifecycleStage;
+    status: TaskGraph["status"];
+    timestamp: string;
+    reason?: string;
+  }>;
 }
 
 export interface TaskExecutionTrace {
@@ -57,6 +121,7 @@ export interface TaskExecutionTrace {
   startTime: string;
   endTime?: string;
   status: TaskStatus;
+  stage?: KernelLifecycleStage;
   retryCount: number;
   revisionCycle?: number;
   evaluator?: string;
@@ -67,11 +132,14 @@ export interface TaskExecutionTrace {
   confidence?: number;
   targetFiles?: string[];
   error?: string;
+  observations?: StructuredObservation[];
+  transitionHistory?: NodeTransitionRecord[];
 }
 
 export interface DAGExecutionResult {
   graph: TaskGraph;
   traces: TaskExecutionTrace[];
+  observations?: StructuredObservation[];
   succeededNodeCount: number;
   failedNodeCount: number;
   blockedNodeCount: number;

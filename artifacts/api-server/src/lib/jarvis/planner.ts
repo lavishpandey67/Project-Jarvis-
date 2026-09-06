@@ -1,8 +1,9 @@
-import { findBestAgentForCapabilities, getAgentByRole } from "./registry";
+import { createDAGFromIntent } from "./dag/planner";
+import { TaskGraph } from "./dag/types";
 import { IntentAnalysis, JarvisPlan, JarvisTaskNode } from "./types";
 
-export function createPlan(intent: IntentAnalysis): JarvisPlan {
-  const planId = `plan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+export function planFromTaskGraph(taskGraph: TaskGraph, intent: IntentAnalysis): JarvisPlan {
+  const planId = `plan_${taskGraph.graphId}`;
 
   if (intent.directResponsePossible && !intent.delegationRequired) {
     return {
@@ -15,31 +16,35 @@ export function createPlan(intent: IntentAnalysis): JarvisPlan {
     };
   }
 
-  // Capability matching to determine assigned agent
-  const matchedAgent = findBestAgentForCapabilities(intent.requiredCapabilities);
-
-  const primaryTaskNode: JarvisTaskNode = {
-    taskId: `task_${Date.now()}_1`,
-    objective: intent.objective,
-    description: `Execute delegated work for objective: ${intent.objective}`,
-    requiredCapabilities: intent.requiredCapabilities,
-    assignedAgentRole: matchedAgent.role,
-    assignedAgentName: matchedAgent.name,
-    expectedOutput: `Structured execution result addressing: ${intent.objective}`,
-    constraints: [
-      "Operate strictly within declared agent permissions.",
-      "Identify explicit assumptions and limitations.",
-      "Return structured response with confidence and evidence.",
-    ],
+  const tasks: JarvisTaskNode[] = taskGraph.nodes.map((node) => ({
+    taskId: node.taskId,
+    objective: node.description,
+    description: node.description,
+    requiredCapabilities: node.requiredCapabilities,
+    assignedAgentRole: node.assignedAgentRole,
+    assignedAgentName: node.assignedAgentName,
+    expectedOutput: node.expectedOutputs || `Structured execution result addressing: ${node.description}`,
+    constraints: node.constraints,
     risk: intent.risk,
-    status: "queued",
-  };
+    status: node.status === "PENDING" ? "queued" : (node.status.toLowerCase() as any),
+  }));
+
+  const roles = Array.from(new Set(taskGraph.nodes.map((n) => n.assignedAgentName)));
+  const summary = tasks.length > 0
+    ? `Jarvis derived a structured ${tasks.length}-step execution plan delegating across: ${roles.join(", ")}.`
+    : "Direct response by Jarvis Brain without workforce delegation.";
 
   return {
     planId,
     objective: intent.objective,
-    directResponsePossible: false,
-    tasks: [primaryTaskNode],
-    summary: `Jarvis created a structured 1-step plan delegating to ${matchedAgent.name}.`,
+    directResponsePossible: tasks.length === 0,
+    tasks,
+    summary,
   };
 }
+
+export function createPlan(intent: IntentAnalysis): JarvisPlan {
+  const taskGraph = createDAGFromIntent(intent);
+  return planFromTaskGraph(taskGraph, intent);
+}
+
